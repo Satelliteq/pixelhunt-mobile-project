@@ -1,28 +1,27 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function Login() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleLogin() {
+  async function handleGoogleLogin() {
     try {
       setLoading(true);
       setError(null);
-      
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
+        }
       });
 
       if (error) throw error;
-      
-      router.replace('/(tabs)');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Giriş yapılırken bir hata oluştu');
     } finally {
@@ -32,43 +31,21 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Giriş Yap</Text>
-      
+      <Text style={styles.title}>Hoş Geldiniz</Text>
+
       {error && (
         <Text style={styles.error}>{error}</Text>
       )}
 
-      <TextInput
-        style={styles.input}
-        placeholder="E-posta"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Şifre"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-
       <TouchableOpacity 
-        style={styles.button}
-        onPress={handleLogin}
+        style={styles.googleButton}
+        onPress={handleGoogleLogin}
         disabled={loading}
       >
+        <Ionicons name="logo-google" size={24} color="white" style={styles.googleIcon} />
         <Text style={styles.buttonText}>
-          {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+          {loading ? 'Giriş yapılıyor...' : 'Google ile Giriş Yap'}
         </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        onPress={() => router.push('/auth/register')}
-        style={styles.link}
-      >
-        <Text style={styles.linkText}>Hesabınız yok mu? Kayıt olun</Text>
       </TouchableOpacity>
     </View>
   );
@@ -79,40 +56,34 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     justifyContent: 'center',
+    backgroundColor: '#f5f5f5',
   },
   title: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 40,
     textAlign: 'center',
+    color: '#1a1a1a',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
+  googleButton: {
+    backgroundColor: '#4285F4',
+    padding: 16,
     borderRadius: 8,
-    marginBottom: 15,
-  },
-  button: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleIcon: {
+    marginRight: 12,
   },
   buttonText: {
     color: 'white',
+    fontSize: 16,
     fontWeight: 'bold',
   },
   error: {
-    color: 'red',
+    color: '#dc2626',
     marginBottom: 15,
     textAlign: 'center',
-  },
-  link: {
-    marginTop: 15,
-    alignItems: 'center',
-  },
-  linkText: {
-    color: '#007AFF',
   },
 });
