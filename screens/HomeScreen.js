@@ -262,13 +262,7 @@ const HomeScreen = ({ navigation }) => {
       {/* IMPORTANT: This is just a visual placeholder. */}
       {/* Real bottom navigation should be implemented using a navigation library */}
       {/* (like React Navigation) outside this screen component. */}
-      <View style={styles.bottomNavPlaceholder}>
-          <Feather name="home" size={26} color={colors.primary} />
-          <Feather name="compass" size={26} color={colors.white} />
-          <Feather name="plus-circle" size={26} color={colors.white} />
-          <Feather name="layers" size={26} color={colors.white} />
-          <Feather name="user" size={26} color={colors.white} />
-      </View>
+      
        {/* --- End Bottom Navigation Placeholder --- */}
 
     </SafeAreaView>
@@ -296,7 +290,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 180, // Adjusted size
+    width: 170, // Adjusted size
     height: 30, // Adjusted size
     marginLeft: 10,
   },

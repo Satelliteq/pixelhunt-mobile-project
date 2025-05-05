@@ -1,13 +1,23 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { theme } from '../theme';
+// import { theme } from '../theme'; // Using specific colors below for clarity
 
+// Define consistent colors matching the design
+const colors = {
+  background: '#000000', // Black background
+  primary: '#FFC107',    // Yellow accent for active icon
+  text: '#FFFFFF',       // White text/icons for inactive state
+  // card: '#212121',     // Not needed directly here
+  // cardText: '#A0A0A0', // Not needed directly here
+};
+
+// Corrected icon names based on the visual design
 const tabIcons = [
   'home',
   'compass',
-  'plus',
-  'book',
+  'plus-circle', // Changed from 'plus'
+  'layers',     // Changed from 'book'
   'user',
 ];
 
@@ -17,7 +27,8 @@ const TabBar = ({ state, descriptors, navigation }) => {
       {state.routes.map((route, idx) => {
         const { options } = descriptors[route.key];
         const isFocused = state.index === idx;
-        let iconName = tabIcons[idx];
+        let iconName = tabIcons[idx]; // Get the correct icon name
+
         const onPress = () => {
           const event = navigation.emit({
             type: 'tabPress',
@@ -25,40 +36,40 @@ const TabBar = ({ state, descriptors, navigation }) => {
             canPreventDefault: true,
           });
           if (!isFocused && !event.defaultPrevented) {
-            navigation.navigate(route.name);
+            // Navigate to the pressed tab screen
+            navigation.navigate(route.name, route.params); // Pass params if any
           }
         };
-        // Ortadaki buton özel tasarım
-        if (idx === 2) {
-          return (
-            <TouchableOpacity
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              onPress={onPress}
-              style={styles.centerTab}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.plusButton, isFocused && styles.plusButtonActive]}>
-                <Feather name={iconName} size={32} color={theme.colors.background} />
-              </View>
-            </TouchableOpacity>
-          );
-        }
+
+        const onLongPress = () => {
+          navigation.emit({
+            type: 'tabLongPress',
+            target: route.key,
+          });
+        };
+
+        // Render a standard touchable opacity for every tab
         return (
           <TouchableOpacity
             key={route.key}
             accessibilityRole="button"
             accessibilityState={isFocused ? { selected: true } : {}}
+            accessibilityLabel={options.tabBarAccessibilityLabel}
+            testID={options.tabBarTestID}
             onPress={onPress}
+            onLongPress={onLongPress}
             style={styles.tab}
-            activeOpacity={0.8}
+            activeOpacity={0.7} // Standard opacity feedback
           >
             <Feather
               name={iconName}
-              size={26}
-              color={isFocused ? theme.colors.primary : theme.colors.textSecondary}
+              size={26} // Consistent icon size
+              color={isFocused ? colors.primary : colors.text} // Yellow if focused, White if not
             />
+            {/* Optional: Add labels if needed, uncomment and style below */}
+            {/* <Text style={{ color: isFocused ? colors.primary : colors.text, fontSize: 10 }}>
+              {label}
+            </Text> */}
           </TouchableOpacity>
         );
       })}
@@ -69,45 +80,23 @@ const TabBar = ({ state, descriptors, navigation }) => {
 const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: theme.colors.background,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    height: 70,
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: colors.background, // Black background
+    // borderTopWidth: 1, // Removed border based on design
+    // borderTopColor: theme.colors.border, // Removed border based on design
+    height: Platform.OS === 'ios' ? 80 : 60, // Standard height, adjust padding for iOS notch area
+    paddingBottom: Platform.OS === 'ios' ? 20 : 0, // Padding for safe area on iOS
+    alignItems: 'center', // Vertically center icons
+    justifyContent: 'space-around', // Evenly distribute tabs
     paddingHorizontal: 8,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 100,
+    // Position, Left, Right, Bottom, zIndex are usually handled by React Navigation
+    // when passed via the tabBar prop, so removed them.
   },
   tab: {
-    flex: 1,
+    flex: 1, // Each tab takes equal space
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center', // Center icon vertically and horizontally
   },
-  centerTab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    top: -18,
-  },
-  plusButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: theme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  plusButtonActive: {
-    backgroundColor: theme.colors.primary,
-  },
+  // Removed centerTab, plusButton, plusButtonActive styles as they are no longer needed
 });
 
-export default TabBar; 
+export default TabBar;
