@@ -8,13 +8,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { theme } from '../theme';
 import { signupSchema } from '../utils/validation';
-import { signUpWithEmail, signInWithGoogle } from '../config/supabase';
-import { Ionicons } from '@expo/vector-icons';
+import { signUpWithEmail, signInWithGoogle } from '../config/firebase';
+import { Feather } from '@expo/vector-icons';
 
 export default function SignupScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -32,13 +33,9 @@ export default function SignupScreen({ navigation }) {
     setIsSubmitting(true);
     try {
       await signUpWithEmail(data.email, data.password, data.name);
-      Alert.alert(
-        'Başarılı',
-        'Kayıt işlemi başarılı. Lütfen e-posta adresinize gönderilen doğrulama linkine tıklayın.',
-      );
       navigation.navigate('Main', { screen: 'Home' });
     } catch (error) {
-      Alert.alert('Hata', 'Kayıt olurken bir hata oluştu. Lütfen tekrar deneyin.');
+      Alert.alert('Hata', 'Kayıt olurken bir hata oluştu.');
     } finally {
       setIsSubmitting(false);
     }
@@ -47,8 +44,9 @@ export default function SignupScreen({ navigation }) {
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
+      navigation.navigate('Main', { screen: 'Home' });
     } catch (error) {
-      Alert.alert('Hata', 'Google ile kayıt olurken bir hata oluştu. Lütfen tekrar deneyin.');
+      Alert.alert('Hata', 'Google ile kayıt olurken bir hata oluştu.');
     }
   };
 
@@ -57,24 +55,30 @@ export default function SignupScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <View style={styles.formContainer}>
-        <Text style={styles.title}>Pixelhunt</Text>
+      <View style={styles.content}>
+        <Image 
+          source={require('../assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        
+        <Text style={styles.title}>Hesap Oluştur</Text>
         <Text style={styles.subtitle}>
           Yeni bir hesap oluşturarak test çözmeye ve oluşturmaya başlayın
         </Text>
 
-        <TouchableOpacity
+        <TouchableOpacity 
           style={styles.googleButton}
           onPress={handleGoogleSignIn}
         >
-          <Ionicons name="logo-google" size={24} color="#4285F4" />
-          <Text style={styles.googleButtonText}>Google ile Kayıt Ol</Text>
+          <Feather name="google" size={24} color="#F9C406" />
+          <Text style={styles.googleButtonText}>Google ile devam et</Text>
         </TouchableOpacity>
 
-        <View style={styles.separator}>
-          <View style={styles.separatorLine} />
-          <Text style={styles.separatorText}>veya e-posta ile</Text>
-          <View style={styles.separatorLine} />
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>veya</Text>
+          <View style={styles.dividerLine} />
         </View>
 
         <Controller
@@ -82,51 +86,50 @@ export default function SignupScreen({ navigation }) {
           name="name"
           render={({ field: { onChange, value } }) => (
             <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color={theme.colors.textSecondary} style={styles.inputIcon} />
+              <Feather name="user" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
-                style={[styles.input, errors.name && styles.inputError]}
+                style={styles.input}
                 placeholder="Ad Soyad"
+                placeholderTextColor="#666"
                 value={value}
                 onChangeText={onChange}
                 autoCapitalize="words"
               />
-              {errors.name && (
-                <Text style={styles.errorText}>{errors.name.message}</Text>
-              )}
             </View>
           )}
         />
+        {errors.name && <Text style={styles.errorText}>{errors.name.message}</Text>}
 
         <Controller
           control={control}
           name="email"
           render={({ field: { onChange, value } }) => (
             <View style={styles.inputContainer}>
-              <Ionicons name="mail-outline" size={20} color={theme.colors.textSecondary} style={styles.inputIcon} />
+              <Feather name="mail" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
-                style={[styles.input, errors.email && styles.inputError]}
-                placeholder="E-posta adresi"
+                style={styles.input}
+                placeholder="E-posta"
+                placeholderTextColor="#666"
                 value={value}
                 onChangeText={onChange}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
-              {errors.email && (
-                <Text style={styles.errorText}>{errors.email.message}</Text>
-              )}
             </View>
           )}
         />
+        {errors.email && <Text style={styles.errorText}>{errors.email.message}</Text>}
 
         <Controller
           control={control}
           name="password"
           render={({ field: { onChange, value } }) => (
             <View style={styles.inputContainer}>
-              <Ionicons name="lock-closed-outline" size={20} color={theme.colors.textSecondary} style={styles.inputIcon} />
+              <Feather name="lock" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
-                style={[styles.input, errors.password && styles.inputError]}
+                style={styles.input}
                 placeholder="Şifre"
+                placeholderTextColor="#666"
                 value={value}
                 onChangeText={onChange}
                 secureTextEntry={!showPassword}
@@ -135,38 +138,37 @@ export default function SignupScreen({ navigation }) {
                 onPress={() => setShowPassword(!showPassword)}
                 style={styles.passwordToggle}
               >
-                <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                <Feather
+                  name={showPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color={theme.colors.textSecondary}
+                  color="#666"
                 />
               </TouchableOpacity>
-              {errors.password && (
-                <Text style={styles.errorText}>{errors.password.message}</Text>
-              )}
             </View>
           )}
         />
+        {errors.password && <Text style={styles.errorText}>{errors.password.message}</Text>}
 
         <Controller
           control={control}
           name="confirmPassword"
           render={({ field: { onChange, value } }) => (
             <View style={styles.inputContainer}>
-              <Ionicons name="lock-closed-outline" size={20} color={theme.colors.textSecondary} style={styles.inputIcon} />
+              <Feather name="lock" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
-                style={[styles.input, errors.confirmPassword && styles.inputError]}
-                placeholder="Şifre Tekrar"
+                style={styles.input}
+                placeholder="Şifreyi Tekrarla"
+                placeholderTextColor="#666"
                 value={value}
                 onChangeText={onChange}
                 secureTextEntry={!showPassword}
               />
-              {errors.confirmPassword && (
-                <Text style={styles.errorText}>{errors.confirmPassword.message}</Text>
-              )}
             </View>
           )}
         />
+        {errors.confirmPassword && (
+          <Text style={styles.errorText}>{errors.confirmPassword.message}</Text>
+        )}
 
         <TouchableOpacity
           style={styles.signupButton}
@@ -179,7 +181,7 @@ export default function SignupScreen({ navigation }) {
         </TouchableOpacity>
 
         <View style={styles.loginContainer}>
-          <Text style={styles.loginText}>Zaten hesabın var mı? </Text>
+          <Text style={styles.loginText}>Zaten hesabınız var mı? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Login')}>
             <Text style={styles.loginLink}>Giriş Yap</Text>
           </TouchableOpacity>
@@ -192,116 +194,116 @@ export default function SignupScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
   },
-  formContainer: {
+  content: {
     flex: 1,
-    padding: theme.spacing.xl,
+    padding: 20,
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logo: {
+    width: 200,
+    height: 60,
+    marginBottom: 40,
   },
   title: {
-    fontSize: theme.typography.h1.fontSize,
-    fontWeight: theme.typography.h1.fontWeight,
-    textAlign: 'center',
-    marginBottom: theme.spacing.sm,
-    color: theme.colors.primary,
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 10,
   },
   subtitle: {
-    fontSize: theme.typography.body.fontSize,
-    color: theme.colors.textSecondary,
+    fontSize: 16,
+    color: '#666',
     textAlign: 'center',
-    marginBottom: theme.spacing.xl,
+    marginBottom: 30,
   },
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.background,
-    height: 50,
-    borderRadius: 8,
+    backgroundColor: '#181818',
+    padding: 16,
+    borderRadius: 12,
+    width: '100%',
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginBottom: theme.spacing.xl,
+    borderColor: '#F9C406',
   },
   googleButtonText: {
-    marginLeft: theme.spacing.sm,
-    fontSize: theme.typography.button.fontSize,
-    fontWeight: theme.typography.button.fontWeight,
-    color: theme.colors.text,
+    color: '#F9C406',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10,
   },
-  separator: {
+  divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.xl,
+    width: '100%',
+    marginBottom: 20,
   },
-  separatorLine: {
+  dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: theme.colors.border,
+    backgroundColor: '#333',
   },
-  separatorText: {
-    marginHorizontal: theme.spacing.sm,
-    fontSize: theme.typography.caption.fontSize,
-    color: theme.colors.textSecondary,
-    textTransform: 'uppercase',
+  dividerText: {
+    color: '#666',
+    paddingHorizontal: 10,
+    fontSize: 14,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.md,
+    backgroundColor: '#181818',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    marginBottom: 15,
+    width: '100%',
+    height: 50,
   },
   inputIcon: {
-    position: 'absolute',
-    left: theme.spacing.md,
-    zIndex: 1,
+    marginRight: 10,
   },
   input: {
     flex: 1,
-    height: 50,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 8,
-    paddingHorizontal: theme.spacing.xl,
-    fontSize: theme.typography.body.fontSize,
-  },
-  inputError: {
-    borderColor: theme.colors.error,
-  },
-  errorText: {
-    color: theme.colors.error,
-    fontSize: theme.typography.caption.fontSize,
-    marginTop: theme.spacing.xs,
-    marginLeft: theme.spacing.md,
+    color: '#fff',
+    fontSize: 16,
   },
   passwordToggle: {
-    position: 'absolute',
-    right: theme.spacing.md,
+    padding: 10,
+  },
+  errorText: {
+    color: '#ff4444',
+    fontSize: 14,
+    marginBottom: 10,
+    alignSelf: 'flex-start',
   },
   signupButton: {
-    backgroundColor: theme.colors.primary,
-    height: 50,
-    borderRadius: 8,
-    justifyContent: 'center',
+    backgroundColor: '#F9C406',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
     alignItems: 'center',
-    marginBottom: theme.spacing.xl,
+    marginTop: 10,
   },
   signupButtonText: {
-    color: theme.colors.background,
-    fontSize: theme.typography.button.fontSize,
-    fontWeight: theme.typography.button.fontWeight,
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   loginContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    marginTop: 20,
   },
   loginText: {
-    fontSize: theme.typography.body.fontSize,
-    color: theme.colors.textSecondary,
+    color: '#666',
+    fontSize: 14,
   },
   loginLink: {
-    fontSize: theme.typography.body.fontSize,
-    color: theme.colors.primary,
+    color: '#F9C406',
+    fontSize: 14,
     fontWeight: 'bold',
   },
-}); 
+});
