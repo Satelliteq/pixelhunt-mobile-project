@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "595531085941",
+    "firebase_url": "https://pixelhunt-7afa8-default-rtdb.firebaseio.com",
+    "project_id": "pixelhunt-7afa8",
+    "storage_bucket": "pixelhunt-7afa8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:595531085941:android:48310a4460ade282d2a03c",
+        "android_client_info": {
+          "package_name": "com.pixelhunt.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "595531085941-eg5molee658dd67l80v8h6comji5q4ua.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPw9V2lEzy9nBvie2PBgbYthWWa0d3k7Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "595531085941-eg5molee658dd67l80v8h6comji5q4ua.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
