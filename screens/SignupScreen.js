@@ -99,6 +99,7 @@ export default function SignupScreen({ navigation }) {
           )}
         />
         {errors.name && <Text style={styles.errorText}>{errors.name.message}</Text>}
+        }
 
         <Controller
           control={control}
@@ -119,6 +120,7 @@ export default function SignupScreen({ navigation }) {
           )}
         />
         {errors.email && <Text style={styles.errorText}>{errors.email.message}</Text>}
+        }
 
         <Controller
           control={control}
@@ -148,6 +150,7 @@ export default function SignupScreen({ navigation }) {
           )}
         />
         {errors.password && <Text style={styles.errorText}>{errors.password.message}</Text>}
+        }
 
         <Controller
           control={control}

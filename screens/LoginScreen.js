@@ -100,6 +100,7 @@ export default function LoginScreen({ navigation }) {
           )}
         />
         {errors.email && <Text style={styles.errorText}>{errors.email.message}</Text>}
+        }
 
         <Controller
           control={control}
@@ -129,6 +130,7 @@ export default function LoginScreen({ navigation }) {
           )}
         />
         {errors.password && <Text style={styles.errorText}>{errors.password.message}</Text>}
+        }
 
         <TouchableOpacity
           style={styles.loginButton}
