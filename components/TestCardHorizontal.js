@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { theme } from '../theme';
 
-const TestCard = ({ test, onPress, style }) => {
+const TestCardHorizontal = ({ test, onPress, style }) => {
   return (
     <TouchableOpacity 
       style={[styles.container, style]} 
@@ -64,9 +64,12 @@ const TestCard = ({ test, onPress, style }) => {
 
 const styles = StyleSheet.create({
   container: {
+    width: '100%',
     backgroundColor: theme.colors.card,
     borderRadius: 16,
+    marginBottom: 16,
     overflow: 'hidden',
+    flexDirection: 'row',
     elevation: 2,
     shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 2 },
@@ -77,8 +80,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   image: {
-    width: '100%',
-    height: 160,
+    width: 120,
+    height: 120,
     resizeMode: 'cover',
   },
   featuredBadge: {
@@ -99,6 +102,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   content: {
+    flex: 1,
     padding: 16,
   },
   title: {
@@ -137,4 +141,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default TestCard;
+export default TestCardHorizontal; 

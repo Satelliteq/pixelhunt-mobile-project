@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet, Dimensions } from 'react-native';
 
 const ProfileAvatar = ({ user, size = 36 }) => {
+  const { width } = Dimensions.get('window');
   if (user?.user_metadata?.avatar_url) {
     return (
       <Image source={{ uri: user.user_metadata.avatar_url }} style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]} />

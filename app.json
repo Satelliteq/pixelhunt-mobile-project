@@ -28,6 +28,16 @@
     },
     "plugins": [
       "expo-font"
+    ],
+    "fonts": [
+      {
+        "asset": "./assets/fonts/Outfit-Regular.ttf",
+        "family": "Outfit_400Regular"
+      },
+      {
+        "asset": "./assets/fonts/Outfit-Bold.ttf",
+        "family": "Outfit_700Bold"
+      }
     ]
   }
 }

@@ -1,494 +1,728 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Dimensions } from 'react-native';
+// HomeScreen.js
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Dimensions,
+  RefreshControl,
+  Alert
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-// import { theme } from '../theme'; // Using specific colors below instead
-import TestCard from '../components/TestCard'; // Assuming this component exists and renders like the design
-import CategoryCard from '../components/CategoryCard'; // Assuming this component exists and renders like the design
-import { supabase, fetchTests, fetchCategories } from '../config/supabase';
-// import ProfileAvatar from '../components/ProfileAvatar'; // Replaced with simple View+Text
-
-// Define colors based on the design
-const colors = {
-  background: '#000000', // Black background
-  text: '#FFFFFF',       // White text
-  primary: '#FFC107',    // Yellow accent
-  card: '#212121',        // Dark grey for cards/tabs background
-  cardText: '#A0A0A0',   // Light grey for inactive text/icons
-  blackText: '#000000',   // Black text (for active tab)
-  white: '#FFFFFF',
-};
+import { theme } from '../theme';
+import TestCard from '../components/TestCard';
+import CategoryCard from '../components/CategoryCard';
+import {
+  onAuthUserChanged,
+  fetchTests,
+  fetchCategories as fetchCategoriesFromFirebase,
+  fetchUserDocument,
+  fetchLikedTestIds,
+  fetchPlayedTestIds,
+  fetchTestsByIds
+} from '../config/firebase';
+import { useNavigation } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
-const testCardWidth = width * 0.6; // Adjust as needed
-const categoryCardWidth = width * 0.3; // Adjust as needed
+const testCardWidth = width * 0.65;
+const categoryCardWidth = width * 0.4;
+const DEFAULT_TEST_LIMIT = 6;
 
-const HomeScreen = ({ navigation }) => {
+const TAB_OPTIONS = [
+  {
+    name: 'Öne Çıkanlar',
+    icon: 'trending-up',
+    options: { 
+      featured: true, 
+      isPublic: true,
+      approved: true,
+      orderByField: 'createdAt', 
+      orderDirection: 'desc',
+      limit: DEFAULT_TEST_LIMIT
+    }
+  },
+  {
+    name: 'Popüler',
+    icon: 'star',
+    options: { 
+      isPublic: true,
+      approved: true,
+      orderByField: 'playCount', 
+      orderDirection: 'desc',
+      limit: DEFAULT_TEST_LIMIT
+    }
+  },
+  {
+    name: 'Yeni Eklenenler',
+    icon: 'clock',
+    options: { 
+      isPublic: true,
+      approved: true,
+      orderByField: 'createdAt', 
+      orderDirection: 'desc',
+      limit: DEFAULT_TEST_LIMIT
+    }
+  },
+];
+
+const HomeScreen = () => {
   const [activeTab, setActiveTab] = useState(0);
-  const [featuredTests, setFeaturedTests] = useState([]);
+  const [testsByTab, setTestsByTab] = useState({});
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingTabs, setLoadingTabs] = useState({ 0: true, 1: false, 2: false });
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [user, setUser] = useState(null);
-  const tabNames = ['Öne Çıkanlar', 'Popüler', 'Yeni Eklenenler'];
-  const tabIcons = ['trending-up', 'star', 'clock'];
+  const [userName, setUserName] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const navigation = useNavigation();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
-    fetchUser();
-    fetchData(); // Initial fetch for 'Öne Çıkanlar'
+    const unsubscribe = onAuthUserChanged(async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        try {
+          const userDoc = await fetchUserDocument(firebaseUser.uid);
+          if (userDoc && userDoc.displayName) {
+            setUserName(userDoc.displayName);
+          } else {
+            setUserName(firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Kullanıcı');
+          }
+        } catch (error) {
+          setUserName(firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Kullanıcı');
+        }
+      } else {
+        setUser(null);
+        setUserName('');
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
-  const fetchUser = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
-      const { data: { user: currentUser }, error } = await supabase.auth.getUser();
-      if (error) throw error;
-      setUser(currentUser);
-    } catch (error) {
-      console.error('Error fetching user:', error);
-    }
-  };
+      setLoadingCategories(true);
+      const categoriesData = await fetchCategoriesFromFirebase();
+      
+      if (!categoriesData || !Array.isArray(categoriesData)) {
+        setCategories([]);
+        return;
+      }
 
-  const fetchData = async (tabIndex = 0) => {
+      const processedCategories = categoriesData
+        .filter(category => category && category.id) // Geçersiz kategorileri filtrele
+        .map(category => ({
+          id: category.id,
+          name: category.name || 'İsimsiz Kategori',
+          description: category.description || '',
+          iconName: category.iconName || 'folder',
+          color: category.color || theme.colors.primary,
+          backgroundColor: category.backgroundColor || theme.colors.background,
+          active: category.active !== false,
+          order: category.order || 0
+        }))
+        .sort((a, b) => (a.order || 0) - (b.order || 0)); // Kategorileri sırala
+
+      setCategories(processedCategories);
+    } catch (error) {
+      setCategories([]); // Hata durumunda boş array
+      Alert.alert(
+        'Hata',
+        'Kategoriler yüklenirken bir sorun oluştu. Lütfen tekrar deneyin.',
+        [
+          {
+            text: 'Tekrar Dene',
+            onPress: () => fetchCategories()
+          },
+          {
+            text: 'Tamam',
+            style: 'cancel'
+          }
+        ]
+      );
+    } finally {
+      setLoadingCategories(false);
+    }
+  }, []);
+
+  const fetchTestsForTab = useCallback(async (tab) => {
+    if (testsByTab[tab]?.length > 0 && !refreshing) return;
+
     try {
       setLoading(true);
+      let tests = [];
 
-      let fetchOptions = {
-        limit: 6,
-        orderBy: 'created_at',
-        ascending: false,
-        featured: tabIndex === 0 ? true : undefined // Only set featured for the first tab initially
-      };
-
-      // Override options based on tab if not initial load
-      if (tabIndex !== 0) {
-         switch (tabIndex) {
-            case 0: // Öne Çıkanlar (already default)
-              fetchOptions.orderBy = 'created_at';
-              fetchOptions.ascending = false;
-              fetchOptions.featured = true; // Explicitly set featured true
-              break;
-            case 1: // Popüler
-              fetchOptions.orderBy = 'play_count';
-              fetchOptions.ascending = false;
-               fetchOptions.featured = undefined;
-              break;
-            case 2: // Yeni Eklenenler
-              fetchOptions.orderBy = 'created_at';
-              fetchOptions.ascending = false;
-               fetchOptions.featured = undefined;
-              break;
+      switch (tab) {
+        case 'featured':
+          tests = await fetchTests({ featured: true, limit: 10 });
+          break;
+        case 'popular':
+          tests = await fetchTests({ orderBy: 'playCount', limit: 10 });
+          break;
+        case 'recent':
+          tests = await fetchTests({ orderBy: 'createdAt', limit: 10 });
+          break;
+        case 'liked':
+          if (user) {
+            const likedTestIds = await fetchLikedTestIds(user.uid);
+            if (likedTestIds.length > 0) {
+              tests = await fetchTestsByIds(likedTestIds);
+            }
           }
+          break;
+        case 'played':
+          if (user) {
+            const playedTestIds = await fetchPlayedTestIds(user.uid);
+            if (playedTestIds.length > 0) {
+              tests = await fetchTestsByIds(playedTestIds);
+            }
+          }
+          break;
+        default:
+          tests = await fetchTests({ limit: 10 });
       }
 
-
-      const testsData = await fetchTests(fetchOptions);
-      setFeaturedTests(testsData);
-
-      // Fetch categories only once
-      if (categories.length === 0) {
-        const categoriesData = await fetchCategories();
-        setCategories(categoriesData);
-      }
-
+      setTestsByTab(prev => ({ ...prev, [tab]: tests }));
+      setError(null);
     } catch (error) {
-      console.error('Veri çekme hatası:', error);
+      setError('Testler yüklenirken bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [testsByTab, user, refreshing]);
+
+  const fetchInitialData = useCallback(async () => {
+    if (!isInitialLoad) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Kategorileri ve testleri paralel olarak yükle
+      await Promise.all([
+        fetchCategories(),
+        fetchTestsForTab(0)
+      ]);
+      
+      setIsInitialLoad(false);
+    } catch (error) {
+      setError('Veriler yüklenirken bir hata oluştu. Lütfen tekrar deneyin.');
+      Alert.alert(
+        'Hata',
+        'Veriler yüklenirken bir sorun oluştu. Lütfen tekrar deneyin.',
+        [
+          {
+            text: 'Tekrar Dene',
+            onPress: () => fetchInitialData()
+          },
+          {
+            text: 'Tamam',
+            style: 'cancel'
+          }
+        ]
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchCategories, fetchTestsForTab, isInitialLoad]);
 
-  const handleTabChange = async (index) => {
+  useEffect(() => {
+    fetchInitialData();
+  }, [fetchInitialData]);
+
+  const handleTabChange = useCallback((index) => {
     setActiveTab(index);
-    fetchData(index); // Fetch data for the selected tab
-  };
+    if (!testsByTab[index] || testsByTab[index].length === 0) {
+      fetchTestsForTab(index);
+    }
+  }, [testsByTab, fetchTestsForTab]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        fetchCategories(),
+        fetchTestsForTab(activeTab, true)
+      ]);
+    } catch (error) {
+      Alert.alert('Hata', 'Veriler yenilenirken bir sorun oluştu.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [activeTab, fetchCategories, fetchTestsForTab]);
 
   const renderTabContent = () => {
-    if (loading) {
+    const currentTests = testsByTab[activeTab] || [];
+    const isLoading = loadingTabs[activeTab];
+
+    if (isLoading && currentTests.length === 0) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={theme.colors.primary} />
         </View>
       );
     }
 
-    // *** Placeholder for TestCard rendering ***
-    // Replace this with your actual TestCard mapping when available
-    // This structure mimics the design's appearance
+    if (!isLoading && currentTests.length === 0) {
+      return (
+        <View style={styles.emptyStateContainer}>
+          <Feather name="inbox" size={48} color={theme.colors.textSecondary} />
+          <Text style={styles.emptyStateText}>Bu sekmede henüz test bulunmuyor.</Text>
+        </View>
+      );
+    }
+
     return (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.horizontalScrollContent}
       >
-        {featuredTests.map((test) => (
-          // Assuming TestCard takes test data and onPress handler
-           <TestCard
-             key={test.id}
-             test={test}
-             style={{ width: testCardWidth, marginRight: 15 }} // Apply width and margin here
-             onPress={() => navigation.navigate('TestDetail', { testId: test.id })}
-           />
-         ))}
-         {/* Add more placeholder cards if needed for visual testing */}
-         {/* <View style={[styles.testCardPlaceholder, { width: testCardWidth }]}>
-              <Image source={require('../assets/rdr2_placeholder.png')} style={styles.testCardImagePlaceholder} />
-              <Text style={styles.testCardTitlePlaceholder}>Oyunu görsellerinden tanıyabilir misin?</Text>
-              <View style={styles.testCardStatsPlaceholder}>
-                  <Feather name="users" size={12} color={colors.cardText} />
-                  <Text style={styles.testCardStatTextPlaceholder}>24k</Text>
-                  <Feather name="thumbs-up" size={12} color={colors.cardText} style={{ marginLeft: 10 }}/>
-                  <Text style={styles.testCardStatTextPlaceholder}>10k</Text>
-              </View>
-          </View> */}
+        {currentTests.map((test) => (
+          <TestCard
+            key={test.id}
+            test={test}
+            style={{ width: testCardWidth, marginRight: 15 }}
+            onPress={() => navigation.navigate('TestDetail', { testId: test.id })}
+          />
+        ))}
+        {/* Yükleniyor ve içerik varsa, sonda küçük bir indicator gösterilebilir */}
+        {isLoading && currentTests.length > 0 && (
+            <View style={{justifyContent: 'center', alignItems: 'center', width: 50}}>
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+            </View>
+        )}
+      </ScrollView>
+    );
+  };
+
+  const renderCategories = () => {
+    if (loadingCategories && categories.length === 0) {
+      return (
+        <View style={styles.loadingContainerSmall}>
+          <ActivityIndicator size="small" color={theme.colors.primary} />
+        </View>
+      );
+    }
+
+    if (categories.length === 0) {
+      return (
+        <View style={styles.emptyStateContainer}>
+          <Feather name="folder" size={48} color={theme.colors.textSecondary} />
+          <Text style={styles.emptyStateText}>Henüz kategori bulunmuyor.</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={fetchCategories}
+          >
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalScrollContent}
+      >
+        {categories.slice(0, 5).map((category) => (
+          <CategoryCard
+            key={category.id}
+            category={category}
+            style={{ width: categoryCardWidth, marginRight: 10 }}
+            onPress={() => navigation.navigate('Explore', { 
+              categoryId: category.id, 
+              categoryName: category.name 
+            })}
+          />
+        ))}
       </ScrollView>
     );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Üst Bar: Logo ve Profil */}
       <View style={styles.topBar}>
-        <View style={styles.logoContainer}>
-          {/* Use your actual logo asset */}
-          <Image source={require('../assets/logo.png')} style={styles.logo} />
-        </View>
-        <TouchableOpacity style={styles.profileButton} onPress={() => navigation.navigate('Profile')}>
-          <View style={styles.profileCircle}>
-            <Text style={styles.profileInitial}>{user?.user_metadata?.name?.[0]?.toUpperCase() || 'K'}</Text>
-          </View>
+        <TouchableOpacity style={styles.logoContainer} onPress={() => navigation.navigate('Home')}>
+          <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={() => navigation.navigate(user ? 'Profile' : 'Login')}
+        >
+          {user ? (
+            <View style={styles.profileCircle}>
+              {user.photoURL ? (
+                <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
+              ) : (
+                <Text style={styles.profileInitial}>
+                  {userName?.[0]?.toUpperCase() || 'K'}
+                </Text>
+              )}
+            </View>
+          ) : (
+            <Feather name="log-in" size={24} color={theme.colors.primary} />
+          )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Hero Section 1 */}
-        <View style={styles.heroSection}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.primary]} // Android için
+            tintColor={theme.colors.primary} // iOS için
+          />
+        }
+      >
+        {/* Hero Section */}
+        <TouchableOpacity
+          style={styles.heroSection}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('Explore')}
+        >
           <View style={styles.heroContent}>
-            <Text style={styles.heroTitle}>Bilginizi Test Edin, Yeni Testler Keşfedin</Text>
+            <Text style={styles.heroTitle}>Bilginizi Test Edin,</Text>
+            <Text style={styles.heroSubtitle}>Yeni Testler Keşfedin!</Text>
+            <View style={styles.heroButton}>
+              <Text style={styles.heroButtonText}>Hemen Başla</Text>
+              <Feather name="arrow-right-circle" size={18} color={theme.colors.primary} style={{marginLeft: 8}} />
+            </View>
           </View>
           <Image
-            source={require('../assets/man-wearing-headphones.png')} // Make sure this path is correct
-            style={styles.heroImage1}
+            source={require('../assets/man-wearing-headphones.png')} // Bu asset'in projenizde olduğundan emin olun
+            style={styles.heroImage}
             resizeMode="contain"
           />
-        </View>
+        </TouchableOpacity>
 
-        {/* Testler Başlık ve Tab Bar */}
-        <View style={styles.sectionHeaderContainer}>
-           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-             <Feather name="filter" size={18} color={colors.primary} style={{ marginRight: 8 }} />
-             <Text style={styles.sectionTitle}>Tüm Testler</Text>
-           </View>
-        </View>
-        <View style={styles.tabBarContainer}>
-          <View style={styles.tabBar}>
-            {tabNames.map((name, index) => {
-              const isActive = activeTab === index;
-              return (
-                <TouchableOpacity
-                  key={name}
-                  style={[
-                    styles.tabBarButton,
-                    isActive && styles.tabBarButtonActive
-                  ]}
-                  onPress={() => handleTabChange(index)}
-                >
-                  <Feather
-                      name={tabIcons[index]}
-                      size={16}
-                      color={isActive ? colors.primary : colors.cardText} // Icon yellow when active
-                      style={{ marginRight: 6 }}
-                  />
-                  <Text style={[
-                    styles.tabBarButtonText,
-                    isActive ? styles.tabBarButtonTextActive : styles.tabBarButtonTextInactive
-                  ]}>
-                    {name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        {/* Testler Bölümü */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderContainer}>
+            <View style={styles.sectionHeaderTitleContainer}>
+              <Feather name="grid" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+              <Text style={styles.sectionTitle}>Popüler Testler</Text>
+            </View>
+            <TouchableOpacity onPress={() => navigation.navigate('Explore', { filter: 'all' })}>
+              <Text style={styles.seeAllText}>Tümünü Gör</Text>
+            </TouchableOpacity>
           </View>
-        </View>
 
-        {/* Testler İçerik */}
-        <View style={styles.testsSection}>
+          <View style={styles.tabBarContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarScroll}>
+              {TAB_OPTIONS.map((tab, index) => {
+                const isActive = activeTab === index;
+                return (
+                  <TouchableOpacity
+                    key={tab.name}
+                    style={[
+                      styles.tabBarButton,
+                      isActive && styles.tabBarButtonActive,
+                    ]}
+                    onPress={() => handleTabChange(index)}
+                    disabled={loadingTabs[index] && (testsByTab[index]?.length === 0 || !testsByTab[index])} // Yüklenirken tekrar tıklamayı engelle (opsiyonel)
+                  >
+                    <Feather
+                      name={tab.icon}
+                      size={16}
+                      color={isActive ? theme.colors.primaryForeground : theme.colors.textSecondary}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={[
+                      styles.tabBarButtonText,
+                      isActive ? styles.tabBarButtonTextActive : styles.tabBarButtonTextInactive,
+                    ]}>
+                      {tab.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
           {renderTabContent()}
         </View>
 
-        {/* Kategoriler */}
-        <View style={styles.categoriesSection}>
+        {/* Kategoriler Bölümü */}
+        <View style={styles.section}>
           <View style={styles.sectionHeaderContainer}>
-             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                 <Feather name="layers" size={18} color={colors.primary} style={{ marginRight: 8 }} />
-                 <Text style={styles.sectionTitle}>Kategoriler</Text>
-             </View>
+            <View style={styles.sectionHeaderTitleContainer}>
+              <Feather name="layers" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+              <Text style={styles.sectionTitle}>Kategoriler</Text>
+            </View>
+            <TouchableOpacity onPress={() => navigation.navigate('Explore', { screenFocus: 'categories' })}>
+              <Text style={styles.seeAllText}>Tümünü Gör</Text>
+            </TouchableOpacity>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalScrollContent}
-          >
-            {categories.map((category) => (
-               // Assuming CategoryCard takes category data and onPress handler
-              <CategoryCard
-                key={category.id}
-                category={category}
-                style={{ width: categoryCardWidth, marginRight: 10 }} // Apply width and margin
-                onPress={() => navigation.navigate('Category', { categoryId: category.id })}
-              />
-            ))}
-            {/* Add more placeholder cards if needed */}
-            {/* <View style={[styles.categoryCardPlaceholder, {width: categoryCardWidth}]}>
-                <Feather name="book-open" size={24} color={colors.cardText} />
-                <Text style={styles.categoryCardTextPlaceholder}>Edebiyat</Text>
-            </View> */}
-          </ScrollView>
+          {renderCategories()}
         </View>
 
-        {/* Alt Bilgi Kutusu / Hero Section 2 */}
-        <View style={styles.infoBox}>
+        {/* Bilgi Kutusu / CTA */}
+        <TouchableOpacity
+            style={styles.infoBox}
+            activeOpacity={0.8}
+            onPress={() => {
+              if (user) {
+                navigation.navigate('CreateTest');
+              } else {
+                Alert.alert("Giriş Gerekli", "Test oluşturmak için lütfen giriş yapın.", [
+                  { text: "İptal", style: "cancel" },
+                  { text: "Giriş Yap", onPress: () => navigation.navigate('Login') }
+                ]);
+              }
+            }}
+        >
            <Image
-                source={require('../assets/man-thinking-with-his-index-finger-to-his-face.png')} // Make sure this path is correct
+                source={require('../assets/man-thinking-with-his-index-finger-to-his-face.png')} // Bu asset'in projenizde olduğundan emin olun
                 style={styles.infoImage}
                 resizeMode="contain"
             />
           <View style={styles.infoContent}>
-             <Text style={styles.infoText}>Görsellerle Düşün, Gördükçe Hafızanı Güçlendir.</Text>
+             <Text style={styles.infoTitle}>Kendi Testini Oluştur!</Text>
+             <Text style={styles.infoText}>Bilgini paylaş, topluluğa katkıda bulun.</Text>
           </View>
-        </View>
-
+          <Feather name="edit-3" size={28} color={theme.colors.background} />
+        </TouchableOpacity>
       </ScrollView>
-
-       {/* --- Bottom Navigation Placeholder --- */}
-      {/* IMPORTANT: This is just a visual placeholder. */}
-      {/* Real bottom navigation should be implemented using a navigation library */}
-      {/* (like React Navigation) outside this screen component. */}
-      
-       {/* --- End Bottom Navigation Placeholder --- */}
-
     </SafeAreaView>
   );
 };
 
+// Stiller (Sizin sağladığınızla aynı, tema.js'nize göre ayarlanmış olmalı)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: theme.colors.background,
   },
   scrollContainer: {
-    paddingBottom: 60, // Add padding to avoid overlap with placeholder nav
+    paddingBottom: theme.spacing.xxl,
   },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: colors.background, // Ensure top bar blends
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: theme.colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
   logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: theme.spacing.xs,
   },
   logo: {
-    width: 170, // Adjusted size
-    height: 30, // Adjusted size
-    marginLeft: 10,
-  },
-  logoText: {
-    fontSize: 20, // Adjusted size
-    fontWeight: 'bold',
-    color: colors.text,
+    width: 150,
+    height: 35,
   },
   profileButton: {
-    // Removed padding, circle handles size
+    padding: theme.spacing.xs,
   },
   profileCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.primary, // Yellow circle
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: theme.colors.background,
+  },
+  profileImage: {
+    width: '100%',
+    height: '100%',
   },
   profileInitial: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: colors.white, // White initial
+    color: theme.colors.primaryForeground, // temanızda tanımlı olmalı
   },
   heroSection: {
     flexDirection: 'row',
-    backgroundColor: colors.primary, // Yellow background
-    borderRadius: 15,
-    marginHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.borderRadius.lg,
+    marginHorizontal: theme.spacing.md,
+    marginTop: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.lg,
     alignItems: 'center',
     justifyContent: 'space-between',
+    elevation: 4,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
   heroContent: {
-    flex: 1, // Takes available space
-    paddingRight: 10, // Space between text and image
+    flex: 1,
+    paddingRight: theme.spacing.md,
   },
   heroTitle: {
-    fontSize: 20, // Adjusted size
-    fontWeight: 'bold',
-    color: colors.white, // White text
-    // Removed marginBottom, let flexbox handle spacing
+    ...(theme.typography?.h2 || { fontSize: 22, fontWeight: 'bold' }), // temanızda tanımlı olmalı
+    color: theme.colors.primaryForeground,
   },
-  heroImage1: {
-    width: 100, // Adjusted size
-    height: 100, // Adjusted size
+  heroSubtitle: {
+    ...(theme.typography?.h3 || { fontSize: 18, fontWeight: '600' }), // temanızda tanımlı olmalı
+    color: theme.colors.primaryForeground,
+    marginBottom: theme.spacing.md,
+  },
+  heroButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.background,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    alignSelf: 'flex-start',
+    elevation: 2,
+    shadowColor: theme.colors.black || '#000', // temanızda tanımlı olmalı
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  heroButtonText: {
+    ...(theme.typography?.button || { fontSize: 14, fontWeight: 'bold' }), // temanızda tanımlı olmalı
+    color: theme.colors.primary,
+  },
+  heroImage: {
+    width: 100,
+    height: 100,
+  },
+  section: {
+    marginTop: theme.spacing.xl,
+    marginBottom: theme.spacing.md,
   },
   sectionHeaderContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      marginBottom: 10, // Space before content/tabs
-      // justifyContent: 'space-between', // If needed for more items
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.md,
   },
-   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text,
+  sectionHeaderTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    ...(theme.typography?.h3 || { fontSize: 18, fontWeight: 'bold' }),
+    color: theme.colors.text,
+  },
+  seeAllText: {
+    ...(theme.typography?.button || { fontSize: 14, fontWeight: '600' }),
+    color: theme.colors.primary,
   },
   tabBarContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 10, // Space before test cards
+    marginBottom: theme.spacing.md,
   },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: colors.card, // Dark grey background for the tab bar itself
-    borderRadius: 10,
-    padding: 4, // Inner padding for the container
-    justifyContent: 'space-between', // Distribute tabs evenly
+  tabBarScroll: {
+    paddingHorizontal: theme.spacing.md,
   },
   tabBarButton: {
-    flex: 1, // Make buttons share space
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10, // Increased padding
-    paddingHorizontal: 5,
-    borderRadius: 8, // Rounded corners for buttons
-    marginHorizontal: 2, // Small gap between buttons
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.full, // temanızda tanımlı olmalı
+    marginRight: theme.spacing.sm,
+    backgroundColor: theme.colors.card,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   tabBarButtonActive: {
-    backgroundColor: colors.primary, // Yellow background for active tab
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
   },
   tabBarButtonText: {
-    fontSize: 13, // Slightly smaller font
-    fontWeight: '600', // Semi-bold
-    textAlign: 'center',
+    ...(theme.typography?.button || { fontSize: 14, fontWeight: '600' }),
   },
-   tabBarButtonTextActive: {
-    color: colors.blackText, // Black text for active tab
+  tabBarButtonTextActive: {
+    color: theme.colors.primaryForeground,
   },
   tabBarButtonTextInactive: {
-      color: colors.cardText, // Light grey text for inactive
-  },
-  testsSection: {
-    // Removed paddingHorizontal, handled by horizontalScrollContent
-     marginBottom: 20,
-  },
-  categoriesSection: {
-     // Removed paddingHorizontal
-     marginBottom: 20,
-  },
-   horizontalScrollContent: {
-    paddingHorizontal: 16, // Add padding here for the scrolling content
-    paddingVertical: 10, // Add some vertical padding if needed
+    color: theme.colors.textSecondary,
   },
   loadingContainer: {
-    height: 150, // Give loading indicator some space
+    height: 200,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  infoBox: {
-    flexDirection: 'row', // Image left, text right
-    backgroundColor: colors.primary, // Yellow background
-    borderRadius: 15,
-    marginHorizontal: 16,
-    marginTop: 10, // Space from categories
-    marginBottom: 20, // Space before bottom nav placeholder
-    padding: 20,
+  loadingContainerSmall: {
+    height: 100,
+    justifyContent: 'center',
     alignItems: 'center',
   },
+  emptyStateContainer: {
+    height: 150,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+  },
+  emptyStateText: {
+    ...(theme.typography?.body || { fontSize: 15 }),
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: theme.spacing.sm,
+  },
+  horizontalScrollContent: {
+    paddingHorizontal: theme.spacing.md,
+    paddingTop: theme.spacing.xs,
+    paddingBottom: theme.spacing.sm,
+  },
+  retryButton: {
+    marginTop: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.borderRadius.md,
+  },
+  retryButtonText: {
+    color: theme.colors.primaryForeground,
+    ...theme.typography.button,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.secondary,
+    borderRadius: theme.borderRadius.lg,
+    marginHorizontal: theme.spacing.md,
+    marginTop: theme.spacing.xl,
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 4,
+    shadowColor: theme.colors.secondary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
   infoImage: {
-    width: 80, // Adjusted size
-    height: 80, // Adjusted size
-    marginRight: 20, // Space between image and text
+    width: 80,
+    height: 80,
+    marginRight: theme.spacing.md,
   },
   infoContent: {
-      flex: 1, // Allow text content to take remaining space
+    flex: 1,
+  },
+  infoTitle: {
+    ...(theme.typography?.h3 || { fontSize: 18, fontWeight: 'bold' }),
+    color: theme.colors.secondaryForeground, // temanızda tanımlı olmalı
+    marginBottom: theme.spacing.xs,
   },
   infoText: {
-    fontSize: 16, // Adjusted size
-    fontWeight: 'bold',
-    color: colors.white, // White text
-    // Removed textAlign: 'center'
+    ...(theme.typography?.body || { fontSize: 14 }),
+    color: theme.colors.secondaryForeground,
   },
-  // --- Placeholder Styles --- (Remove if using actual components)
-  testCardPlaceholder: {
-      backgroundColor: colors.card,
-      borderRadius: 10,
-      padding: 10,
-      marginRight: 15,
-      alignItems: 'flex-start', // Align content to start
-  },
-  testCardImagePlaceholder: {
-      width: '100%',
-      height: 100, // Example height
-      borderRadius: 8,
-      backgroundColor: '#555', // Placeholder color
-      marginBottom: 8,
-  },
-  testCardTitlePlaceholder: {
-      color: colors.text,
-      fontSize: 14,
-      fontWeight: '600',
-      marginBottom: 5,
-  },
-  testCardStatsPlaceholder: {
-      flexDirection: 'row',
-      alignItems: 'center',
-  },
-   testCardStatTextPlaceholder: {
-      color: colors.cardText,
-      fontSize: 12,
-      marginLeft: 4,
-  },
-  categoryCardPlaceholder: {
-      backgroundColor: colors.card, // Dark grey
-      borderRadius: 10,
-      padding: 15,
-      marginRight: 10,
-      alignItems: 'center', // Center icon and text
-      justifyContent: 'center',
-      height: 100, // Example height
-  },
-  categoryCardTextPlaceholder: {
-      color: colors.cardText, // Light grey text
-      fontSize: 13,
-      marginTop: 8,
-  },
-  // --- Bottom Nav Placeholder Style ---
-   bottomNavPlaceholder: {
-        position: 'absolute', // Position it at the bottom
-        bottom: 0,
-        left: 0,
-        right: 0,
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        alignItems: 'center',
-        height: 60, // Standard height for bottom nav
-        backgroundColor: colors.background, // Black background
-        borderTopWidth: 1, // Optional: slight separator line
-        borderTopColor: '#222', // Dark grey line
-        paddingBottom: 5, // Padding for safe area nuances if needed
-        paddingHorizontal: 10,
-   },
 });
 
 export default HomeScreen;

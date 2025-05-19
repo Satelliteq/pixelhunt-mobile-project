@@ -16,8 +16,7 @@ const colors = {
 const tabIcons = [
   'home',
   'compass',
-  'plus-circle', // Changed from 'plus'
-  'layers',     // Changed from 'book'
+  'layers',
   'user',
 ];
 
@@ -27,7 +26,7 @@ const TabBar = ({ state, descriptors, navigation }) => {
       {state.routes.map((route, idx) => {
         const { options } = descriptors[route.key];
         const isFocused = state.index === idx;
-        let iconName = tabIcons[idx]; // Get the correct icon name
+        let iconName = tabIcons[idx];
 
         const onPress = () => {
           const event = navigation.emit({
@@ -36,8 +35,7 @@ const TabBar = ({ state, descriptors, navigation }) => {
             canPreventDefault: true,
           });
           if (!isFocused && !event.defaultPrevented) {
-            // Navigate to the pressed tab screen
-            navigation.navigate(route.name, route.params); // Pass params if any
+            navigation.navigate(route.name, route.params);
           }
         };
 
@@ -48,7 +46,6 @@ const TabBar = ({ state, descriptors, navigation }) => {
           });
         };
 
-        // Render a standard touchable opacity for every tab
         return (
           <TouchableOpacity
             key={route.key}
@@ -59,17 +56,13 @@ const TabBar = ({ state, descriptors, navigation }) => {
             onPress={onPress}
             onLongPress={onLongPress}
             style={styles.tab}
-            activeOpacity={0.7} // Standard opacity feedback
+            activeOpacity={0.7}
           >
             <Feather
               name={iconName}
-              size={26} // Consistent icon size
-              color={isFocused ? colors.primary : colors.text} // Yellow if focused, White if not
+              size={26}
+              color={isFocused ? colors.primary : colors.text}
             />
-            {/* Optional: Add labels if needed, uncomment and style below */}
-            {/* <Text style={{ color: isFocused ? colors.primary : colors.text, fontSize: 10 }}>
-              {label}
-            </Text> */}
           </TouchableOpacity>
         );
       })}

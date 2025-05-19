@@ -1,61 +1,59 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Feather } from 'react-native-feather';
+import { Feather } from '@expo/vector-icons';
+import { theme } from '../theme';
 
-const categoryIcons = {
-  'Film': 'film',
-  'Dizi': 'tv',
-  'Oyun': 'cpu',
-  'Müzik': 'music',
-  'Spor': 'activity',
-  'Sanat': 'image',
-  'Edebiyat': 'book',
-  'Coğrafya': 'globe',
-  'Tarih': 'clock',
-  'Genel': 'grid',
-};
+const CategoryCard = ({ category, onPress, style }) => {
+  const { name, description, iconName = 'folder', color = theme.colors.primary, backgroundColor = theme.colors.background } = category;
 
-const CategoryCard = ({ name, count, onPress }) => {
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.iconWrap}>
-        <Feather name={categoryIcons[name] || 'grid'} size={28} color={'#FFD600'} />
+    <TouchableOpacity
+      style={[
+        styles.container,
+        { backgroundColor },
+        style
+      ]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
+        <Feather name={iconName} size={24} color={color} />
       </View>
-      <Text style={styles.name} numberOfLines={1}>{name}</Text>
-      {count !== undefined && <Text style={styles.count}>{count} test</Text>}
+      <Text style={[styles.name, { color }]} numberOfLines={1}>
+        {name}
+      </Text>
+      {description && (
+        <Text style={styles.description} numberOfLines={2}>
+          {description}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
-  card: {
-    borderRadius: 16,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    minWidth: 90,
-    minHeight: 90,
-    backgroundColor: '#181818',
-    elevation: 2,
+  container: {
+    padding: theme.spacing.m,
+    borderRadius: theme.borderRadius.l,
+    ...theme.shadows.medium,
+    width: '100%',
+    minHeight: 120,
   },
-  iconWrap: {
-    backgroundColor: '#222',
-    borderRadius: 12,
-    padding: 8,
-    marginBottom: 6,
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: theme.borderRadius.m,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: theme.spacing.s,
   },
   name: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 2,
-    marginBottom: 2,
+    ...theme.typography.h3,
+    marginBottom: theme.spacing.xs,
   },
-  count: {
-    fontSize: 12,
-    color: '#FFD600',
-    marginTop: 0,
+  description: {
+    ...theme.typography.body2,
+    color: theme.colors.textSecondary,
   },
 });
 

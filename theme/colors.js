@@ -9,4 +9,12 @@ export const colors = {
   success: '#34C759',
   warning: '#FF9500',
   info: '#5AC8FA',
+  white: '#FFFFFF',
+  black: '#000000',
+  disabled: '#A0A0A0',
+  inputBackground: '#F5F5F5',
+  inputText: '#000000',
+  textPlaceholder: '#888888',
+  primaryForeground: '#FFFFFF',
+  card: '#F5F5F5',
 }; 
