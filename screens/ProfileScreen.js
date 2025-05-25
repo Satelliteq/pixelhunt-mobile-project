@@ -1,5 +1,5 @@
 // ProfileScreen.js
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,472 +7,328 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  ScrollView,
   RefreshControl,
-  FlatList,
-  Dimensions,
-  SafeAreaView,
   Alert,
-  ScrollView // For content within tabs if not using FlatList for everything
+  Dimensions,
+  TextInput,
+  Animated,
+  FlatList
 } from 'react-native';
-import { theme } from '../theme'; // Ensure your theme is correctly set up for dark mode
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'; // Added MaterialCommunityIcons
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { onAuthUserChanged, signOut } from '../config/firebase';
+import * as Haptics from 'expo-haptics';
+import { theme } from '../theme';
+import { doc, getDoc, collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import TestCard from '../components/TestCard';
-import {
-  onAuthUserChanged,
-  signOut as firebaseSignOut,
-  fetchUserDocument,
-  fetchUserStats, // Assuming this fetches more detailed stats now
-  fetchTests,
-  fetchPlayedTestIds,
-  fetchLikedTestIds,
-  fetchTestsByIds,
-  // You might need new functions like:
-  // fetchUserActivity(userId, limit) -> [{ type: 'played_test', testName: 'X', score: 100, date: '...'}, ...]
-  // fetchUserAchievements(userId) -> [{ id: 'ach1', name: 'First Test Played', earned: true, icon: '...'}, ...]
-} from '../config/firebase';
 
-const NUM_COLUMNS_TESTS = 2; // For "My Tests" tab
-const { width } = Dimensions.get('window');
-const HORIZONTAL_PADDING = theme.spacing.md;
-const CARD_SPACING_TESTS = theme.spacing.sm;
+const TABS = [
+  { key: 'tests', label: 'Testlerim', icon: 'file-text' },
+  { key: 'played', label: 'Oynadıklarım', icon: 'play' },
+  { key: 'stats', label: 'İstatistikler', icon: 'bar-chart-2' },
+  { key: 'badges', label: 'Rozetler', icon: 'award' },
+  { key: 'account', label: 'Hesap', icon: 'user' },
+];
 
-// --- Helper to format date ---
-const formatDate = (timestamp, options = { day: '2-digit', month: '2-digit', year: 'numeric' }) => {
-  if (!timestamp) return '-';
+const formatDate = (date) => {
+  if (!date) return '';
   try {
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('tr-TR', options);
-  } catch (e) {
-    console.warn("Date formatting error:", e);
-    return '-';
+    return new Date(date).toLocaleDateString('tr-TR');
+  } catch {
+    return '';
   }
 };
 
-// --- Screen Header Component ---
-const ProfileScreenHeader = memo(({ navigation, user, userData, onEditProfile }) => {
-  const displayName = userData?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Kullanıcı';
-  const username = userData?.username || user?.email?.split('@')[0] || 'kullanici_adi';
-  const photoURL = userData?.photoURL || user?.photoURL;
-  const joinDate = user?.metadata?.creationTime;
-  const isVerified = userData?.isVerified || user?.emailVerified || false; // Example verification status
-
-  return (
-    <View style={styles.profileHeaderCard}>
-      <View style={styles.profileHeaderTopRow}>
-        <View style={styles.profileHeaderAvatarContainer}>
-          {photoURL ? (
-            <Image source={{ uri: photoURL }} style={styles.profileHeaderAvatar} />
-          ) : (
-            <View style={styles.profileHeaderDefaultAvatar}>
-              <Text style={styles.profileHeaderAvatarLetter}>{displayName.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.profileHeaderTextContainer}>
-          <View style={styles.profileHeaderNameRow}>
-            <Text style={styles.profileHeaderDisplayName}>{displayName}</Text>
-            {isVerified && (
-              <View style={styles.verifiedBadge}>
-                <Feather name="check" size={12} color={theme.colors.background} />
-                <Text style={styles.verifiedBadgeText}>Doğrulanmış</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.profileHeaderUsername}>@{username}</Text>
-        </View>
-      </View>
-
-      <View style={styles.profileHeaderMetaRow}>
-        <View style={styles.metaItem}>
-          <Feather name="mail" size={14} color={theme.colors.textSecondary} />
-          <Text style={styles.metaText}>{user?.email || 'E-posta gizli'}</Text>
-        </View>
-        <View style={styles.metaItem}>
-          <Feather name="calendar" size={14} color={theme.colors.textSecondary} />
-          <Text style={styles.metaText}>{formatDate(joinDate)} tarihinde katıldı</Text>
-        </View>
-      </View>
-      <TouchableOpacity style={styles.editProfileButton} onPress={onEditProfile}>
-        <Feather name="edit-2" size={16} color={theme.colors.primaryForeground} />
-        <Text style={styles.editProfileButtonText}>Profili Düzenle</Text>
-      </TouchableOpacity>
-    </View>
-  );
-});
-
-
-// --- Segmented Control / Icon Tabs ---
-const ProfileTabs = memo(({ activeTab, onTabChange }) => {
-  const TABS_CONFIG = [
-    // Icons based on the reference image's tab bar
-    { key: 'myTests', icon: 'book-open', label: 'Testlerim' }, // Or 'edit-3'
-    { key: 'activity', icon: 'activity', label: 'Aktiviteler' }, // Or 'clock'
-    { key: 'stats', icon: 'bar-chart-2', label: 'İstatistikler' }, // Or 'award' for "Skor İstatistikleri"
-    { key: 'achievements', icon: 'award', label: 'Başarılar' }, // Or 'shield'
-    { key: 'settings', icon: 'settings', label: 'Ayarlar' }, // Or 'user' for a more generic profile section
-  ];
-
-  return (
-    <View style={styles.iconTabsContainer}>
-      {TABS_CONFIG.map((tab) => (
-        <TouchableOpacity
-          key={tab.key}
-          style={[styles.iconTab, activeTab === tab.key && styles.activeIconTab]}
-          onPress={() => onTabChange(tab.key)}
-          accessibilityRole="tab"
-          accessibilityLabel={tab.label}
-          accessibilityState={{ selected: activeTab === tab.key }}
-        >
-          <Feather 
-            name={tab.icon} 
-            size={24} 
-            color={activeTab === tab.key ? theme.colors.primary : theme.colors.textSecondary} 
-          />
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-});
-
-// --- Content Components for Tabs ---
-
-const MyTestsTab = memo(({ tests, navigation, isLoading }) => {
-  const renderTestItem = useCallback(({ item, index }) => {
-    const cardWidth = (width - HORIZONTAL_PADDING * 2 - CARD_SPACING_TESTS * (NUM_COLUMNS_TESTS - 1)) / NUM_COLUMNS_TESTS;
-    return (
-      <TestCard
-        test={item}
-        style={[
-          styles.gridTestCard,
-          { width: cardWidth },
-          (index % NUM_COLUMNS_TESTS !== NUM_COLUMNS_TESTS - 1) && { marginRight: CARD_SPACING_TESTS }
-        ]}
-        onPress={() => navigation.navigate('TestDetail', { testId: item.id })}
-      />
-    );
-  }, [navigation]);
-
-  if (isLoading) {
-    return <ActivityIndicator style={styles.tabContentLoadingIndicator} size="large" color={theme.colors.primary} />;
-  }
-
-  if (tests.length === 0) {
-    return <Text style={styles.emptyTabText}>Henüz oluşturulmuş test bulunmuyor.</Text>;
-  }
-
-  return (
-    <FlatList
-      data={tests}
-      renderItem={renderTestItem}
-      keyExtractor={(item) => item.id.toString()}
-      numColumns={NUM_COLUMNS_TESTS}
-      style={styles.testsGrid}
-      // contentContainerStyle={{ paddingBottom: theme.spacing.md }}
-      scrollEnabled={false} // If this tab is part of a larger ScrollView/FlatList
-    />
-  );
-});
-
-const StatsTab = memo(({ userStats, isLoading }) => { // userStats should be the detailed stats object
-  if (isLoading) {
-    return <ActivityIndicator style={styles.tabContentLoadingIndicator} size="large" color={theme.colors.primary} />;
-  }
-  if (!userStats) {
-    return <Text style={styles.emptyTabText}>İstatistikler yüklenemedi.</Text>;
-  }
-
-  const gameModes = userStats.gameModes || [
-    { name: 'Klasik Mod', gamesPlayed: 0 },
-    { name: 'Hızlı Mod', gamesPlayed: 0 },
-    { name: 'Zamanlı Mod', gamesPlayed: 0 },
-    { name: 'Test Modu', gamesPlayed: 0 },
-  ];
-
-
-  return (
-    <View style={styles.contentCard}>
-        <View style={styles.contentCardHeader}>
-            <Feather name="bar-chart-2" size={20} color={theme.colors.primary} />
-            <Text style={styles.contentCardTitle}>Skor İstatistikleri</Text>
-        </View>
-        <Text style={styles.contentCardSubtitle}>Tüm oyunlardaki performansınız</Text>
-
-        <View style={styles.statsHighlightRow}>
-            <View style={styles.statsHighlightItem}>
-                <Text style={styles.statsHighlightLabel}>Toplam Puan</Text>
-                <Text style={styles.statsHighlightValue}>{(userStats.totalScore || 0).toLocaleString()}</Text>
-            </View>
-            <View style={styles.statsHighlightItem}>
-                <Text style={styles.statsHighlightLabel}>Oyun Sayısı</Text>
-                <Text style={styles.statsHighlightValue}>{(userStats.totalPlays || 0).toLocaleString()}</Text>
-            </View>
-        </View>
-        
-        <Text style={styles.subSectionTitle}>Oyun Modlarına Göre</Text>
-        {gameModes.map(mode => (
-            <View key={mode.name} style={styles.gameModeStatRow}>
-                <Text style={styles.gameModeName}>{mode.name}</Text>
-                <Text style={styles.gameModeCount}>{mode.gamesPlayed} oyun</Text>
-            </View>
-        ))}
-    </View>
-  );
-});
-
-const ActivityTab = memo(({ userActivity, isLoading }) => { // userActivity: array of activity items
-    if (isLoading) {
-        return <ActivityIndicator style={styles.tabContentLoadingIndicator} size="large" color={theme.colors.primary} />;
-    }
-    if (!userActivity || userActivity.length === 0) {
-        return <Text style={styles.emptyTabText}>Henüz bir aktivite bulunmuyor.</Text>;
-    }
-
-    return (
-        <View style={styles.contentCard}>
-            <View style={styles.contentCardHeader}>
-                <Feather name="activity" size={20} color={theme.colors.primary} />
-                <Text style={styles.contentCardTitle}>Son Aktiviteler</Text>
-            </View>
-            {userActivity.map((activity, index) => (
-                <View key={index} style={styles.activityItem}>
-                    <Text style={styles.activityText}>
-                        {activity.type === 'played_test' ? `Test oynandı: ${activity.testName}, Skor: ${activity.score}` : activity.description}
-                    </Text>
-                    <Text style={styles.activityDate}>{formatDate(activity.date, { day:'numeric', month:'short', year:'numeric' })}</Text>
-                </View>
-            ))}
-        </View>
-    );
-});
-
-const AchievementsTab = memo(({ userAchievements, isLoading }) => { // userAchievements: array of achievement items
-    if (isLoading) {
-        return <ActivityIndicator style={styles.tabContentLoadingIndicator} size="large" color={theme.colors.primary} />;
-    }
-    if (!userAchievements || userAchievements.length === 0) {
-        return <Text style={styles.emptyTabText}>Henüz kazanılmış başarı bulunmuyor.</Text>;
-    }
-    
-    // Calculate total score from achievements if applicable, or use overall total score
-    const totalScoreFromAchievements = userAchievements.reduce((sum, ach) => sum + (ach.points || 0), 0);
-    const displayTotalScore = totalScoreFromAchievements > 0 ? totalScoreFromAchievements : (/* a general total score from stats if needed */ 0);
-
-
-    return (
-        <View style={styles.contentCard}>
-            <View style={styles.contentCardHeader}>
-                <Feather name="award" size={20} color={theme.colors.primary} />
-                <Text style={styles.contentCardTitle}>Başarılar</Text>
-            </View>
-            <Text style={styles.contentCardSubtitle}>Oyun içi başarılarınız</Text>
-
-            {/* Example structure for achievements */}
-            {userAchievements.map((ach, index) => (
-                <View key={ach.id || index} style={styles.achievementItem}>
-                    <MaterialCommunityIcons name={ach.icon || "star-circle-outline"} size={30} color={ach.earned ? theme.colors.primary : theme.colors.textDisabled} />
-                    <View style={styles.achievementTextContainer}>
-                        <Text style={[styles.achievementName, !ach.earned && styles.achievementNotEarned]}>{ach.name}</Text>
-                        {ach.description && <Text style={styles.achievementDescription}>{ach.description}</Text>}
-                    </View>
-                    {ach.points && <Text style={styles.achievementPoints}>{ach.points} Puan</Text>}
-                </View>
-            ))}
-
-            {displayTotalScore > 0 && (
-                 <View style={styles.totalScoreBadge}>
-                    <Feather name="award" size={24} color={theme.colors.background} />
-                    <Text style={styles.totalScoreBadgeLabel}>Toplam Puan</Text>
-                    <Text style={styles.totalScoreBadgeValue}>{displayTotalScore.toLocaleString()}</Text>
-                </View>
-            )}
-        </View>
-    );
-});
-
-
-// --- Main Profile Screen Component ---
-export default function ProfileScreen({ navigation }) {
+export default function ProfileScreen() {
+  const navigation = useNavigation();
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
-  const [userStats, setUserStats] = useState(null); // More detailed stats from fetchUserStats
-  const [myTests, setMyTests] = useState([]);
-  const [userActivity, setUserActivity] = useState([]); // Placeholder for activity feed
-  const [userAchievements, setUserAchievements] = useState([]); // Placeholder for achievements
-
+  const [userStats, setUserStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tabContentLoading, setTabContentLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
-  
-  const [activeTab, setActiveTab] = useState('stats'); // Default to 'stats' as per image
+  const [activeTab, setActiveTab] = useState('tests');
+  const [isEditing, setIsEditing] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
 
-  // Fetches data for a specific tab
-  const loadTabContent = useCallback(async (tabKey, userId) => {
-    if (!userId) return;
-    setTabContentLoading(true);
-    setError(null);
-
-    try {
-      switch (tabKey) {
-        case 'myTests':
-          const tests = await fetchTests({ creatorId: userId, limit: 10, orderByField: 'createdAt', orderDirection: 'desc', isPublic: true, approved: true });
-          setMyTests(Array.isArray(tests) ? tests : []);
-          break;
-        case 'stats':
-          const statsData = await fetchUserStats(userId); // This should fetch detailed stats
-          setUserStats(statsData);
-          break;
-        case 'activity':
-          // const activityData = await fetchUserActivity(userId, 10); // Implement this
-          setUserActivity([ // Placeholder data
-            { type: 'played_test', testName: 'Ünlü Şehirler', score: 600, date: new Date('2025-05-16T10:00:00Z') },
-            { type: 'played_test', testName: 'Ünlü Şehirler', score: 800, date: new Date('2025-05-16T09:00:00Z') },
-            { type: 'created_test', description: 'Yeni bir test oluşturdu: Tarihi Yapılar', date: new Date('2025-05-15T14:30:00Z') },
-          ]);
-          break;
-        case 'achievements':
-          // const achievementsData = await fetchUserAchievements(userId); // Implement this
-          setUserAchievements([ // Placeholder data
-            { id: 'ach1', name: 'İlk 10 Testi Tamamla', earned: true, icon: 'medal-outline', points: 100, description: '10 farklı testi başarıyla tamamladın.' },
-            { id: 'ach2', name: 'Skor Ustası', earned: true, icon: 'trophy-award', points: 500, description: 'Bir testte 5000+ puan kazandın.' },
-            { id: 'ach3', name: 'Test Oluşturucu', earned: false, icon: 'pencil-box-outline', points: 200, description: 'İlk testini oluştur.' },
-          ]);
-          break;
-        case 'settings':
-          // No data to load, navigation handled by onTabChange or a direct button
-          break;
-        default:
-          console.warn(`Content loader for tab "${tabKey}" not implemented.`);
-      }
-    } catch (e) {
-      console.error(`Error loading content for tab "${tabKey}":`, e);
-      setError(`"${getTabName(tabKey)}" içeriği yüklenirken bir sorun oluştu.`);
-    } finally {
-      setTabContentLoading(false);
-    }
-  }, []);
-
-  // Fetches initial user document, and then loads content for the active tab
-  const loadInitialScreenData = useCallback(async (userId) => {
-    if (!userId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const fetchedUserDoc = await fetchUserDocument(userId);
-      if (fetchedUserDoc) setUserData(fetchedUserDoc);
-      // Load content for the default/active tab
-      await loadTabContent(activeTab, userId);
-    } catch (e) {
-      console.error('Initial screen data fetch error:', e);
-      setError('Profil bilgileri yüklenirken bir sorun oluştu.');
-      setUserData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab, loadTabContent]);
-
-  // Handles tab changes
-  const handleTabChange = useCallback((newTabKey) => {
-    if (!user) return;
-    if (newTabKey === 'settings') {
-        navigation.navigate('Settings'); // Or your specific settings screen name
-        return;
-    }
-    if (newTabKey === activeTab && (newTabKey === 'myTests' ? myTests.length > 0 : newTabKey === 'stats' ? userStats : true)) {
-        // Avoid reloading if tab is same and content already loaded, unless it's an empty state you want to refresh
-        return;
-    }
-    setActiveTab(newTabKey);
-    loadTabContent(newTabKey, user.uid);
-  }, [user, activeTab, loadTabContent, navigation, myTests, userStats]);
-
-  // Pull-to-refresh handler
-  const onRefresh = useCallback(async () => {
-    if (!user) {
-      setRefreshing(false);
-      return;
-    }
-    setRefreshing(true);
-    setError(null); 
-    try {
-      await loadInitialScreenData(user.uid); // Reloads user doc and current active tab's content
-    } catch (err) {
-      console.error("Refresh operation error:", err);
-      setError("Yenileme sırasında bir hata oluştu.");
-    } finally {
-      setRefreshing(false);
-    }
-  }, [user, loadInitialScreenData]);
-
-  // Sign out handler
-  const handleSignOut = useCallback(async () => {
-    Alert.alert("Çıkış Yap", "Hesabınızdan çıkış yapmak istediğinize emin misiniz?",
-      [{ text: "İptal", style: "cancel" },
-       { text: "Çıkış Yap", style: "destructive", onPress: async () => {
-          try { await firebaseSignOut(); } catch (e) { console.error('Sign out error:', e); Alert.alert('Çıkış Hatası', 'Çıkış yapılırken bir sorun oluştu.'); }
-      }}]);
-  }, []);
-  
-  // Auth state listener
   useEffect(() => {
     const unsubscribe = onAuthUserChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        const isNewUserLogin = !user || user.uid !== firebaseUser.uid;
-        setUser(firebaseUser);
-        if (isNewUserLogin) { 
-          await loadInitialScreenData(firebaseUser.uid);
+      try {
+        setLoading(true);
+        if (!firebaseUser) {
+          setUser(null);
+          setUserData(null);
+          setUserStats(null);
+          setDisplayName('');
+          setUsername('');
+          return;
         }
-      } else {
-        setUser(null); setUserData(null); setMyTests([]); setUserStats(null); setUserActivity([]); setUserAchievements([]);
-        setError(null); setLoading(false);
+
+      setUser(firebaseUser);
+          
+          // Kullanıcı verilerini çek
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const userSnap = await getDoc(userRef);
+          
+          if (!userSnap.exists()) {
+            console.error('Kullanıcı verileri bulunamadı');
+            Alert.alert('Hata', 'Kullanıcı verileri yüklenemedi. Lütfen tekrar deneyin.');
+            return;
+          }
+          
+          const userData = userSnap.data();
+
+        // Paralel olarak verileri çek
+        const [gameScoresSnap, createdTestsSnap] = await Promise.all([
+          // Son 15 oyun skoru
+          getDocs(query(
+            collection(db, 'gameScores'),
+            where('userId', '==', firebaseUser.uid),
+            orderBy('createdAt', 'desc'),
+            limit(15)
+          )),
+          // Oluşturulan testler
+          getDocs(query(
+            collection(db, 'tests'),
+            where('creatorId', '==', firebaseUser.uid)
+          ))
+        ]);
+
+        // Oyun skorlarını işle
+        const gameScores = gameScoresSnap.docs.map(doc => ({
+            id: doc.id,
+          ...doc.data()
+        }));
+
+        // Test detaylarını toplu olarak çek
+        const testIds = [...new Set(gameScores.map(score => score.testId))];
+        const testSnaps = await Promise.all(
+          testIds.map(testId => getDoc(doc(db, 'tests', testId)))
+        );
+
+        // Test detaylarını bir map'e dönüştür
+        const testDetailsMap = testSnaps.reduce((acc, snap) => {
+          if (snap.exists()) {
+            acc[snap.id] = snap.data();
+          }
+          return acc;
+        }, {});
+
+        // Oyun skorlarını test detaylarıyla birleştir
+        const playedTests = gameScores.map(score => {
+          const testData = testDetailsMap[score.testId] || {};
+              return {
+            id: score.id,
+            testId: score.testId,
+            score: score.score || 0,
+            completionTime: score.completionTime || 0,
+            attemptsCount: score.attemptsCount || 0,
+            completed: score.completed || false,
+            playedAt: score.createdAt?.toDate?.() || new Date(),
+            title: testData.title || 'İsimsiz Test',
+            description: testData.description || 'Açıklama bulunmuyor',
+            thumbnailUrl: testData.thumbnailUrl || null,
+            categoryId: testData.categoryId || null,
+            creatorId: testData.creatorId || null
+              };
+        });
+
+        // İstatistikleri hesapla
+        const totalScore = gameScores.reduce((acc, score) => acc + (score.score || 0), 0);
+        const totalTestsPlayed = gameScores.length;
+        const totalTime = gameScores.reduce((acc, score) => acc + (score.completionTime || 0), 0);
+        const averageTime = totalTestsPlayed > 0 ? Math.round(totalTime / totalTestsPlayed) : 0;
+        const totalTestsCreated = createdTestsSnap.docs.length;
+        const completedTests = gameScores.filter(score => score.completed).length;
+        const successRate = totalTestsPlayed > 0 ? Math.round((completedTests / totalTestsPlayed) * 100) : 0;
+          
+        // Güncellenmiş istatistikleri oluştur
+        const updatedStats = {
+          total_tests_created: totalTestsCreated,
+          total_score_achieved: totalScore,
+          total_tests_played: totalTestsPlayed,
+          average_time: averageTime > 0 ? `${Math.floor(averageTime / 60)}:${(averageTime % 60).toString().padStart(2, '0')}` : '0:00',
+          success_rate: successRate,
+          completed_tests: completedTests
+        };
+          
+          // Verileri state'e kaydet
+          setUserData({
+            ...userData,
+          createdTests: createdTestsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate?.() || new Date()
+          })),
+          playedTests,
+          badges: userData.badges || []
+          });
+        setUserStats(updatedStats);
+          setDisplayName(userData.displayName || firebaseUser.displayName || '');
+          setUsername(userData.username || firebaseUser.email?.split('@')[0] || '');
+      } catch (error) {
+        console.error('Veri çekme hatası:', error);
+        Alert.alert('Hata', 'Kullanıcı verileri yüklenirken bir hata oluştu: ' + error.message);
+      } finally {
+        setLoading(false);
       }
     });
     return () => unsubscribe();
-  }, [user, loadInitialScreenData]);
+  }, []);
 
-  // --- Render Logic ---
-  const renderActiveTabContent = () => {
-    if (tabContentLoading && activeTab !== 'settings') {
-      return <ActivityIndicator style={styles.tabContentLoadingIndicator} size="large" color={theme.colors.primary} />;
-    }
-    if (error && activeTab !== 'settings') {
-      return (
-        <View style={styles.errorContainer}>
-          <Feather name="alert-circle" size={30} color={theme.colors.error} />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity onPress={() => loadTabContent(activeTab, user.uid)} style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
-          </TouchableOpacity>
-        </View>
+  const handleSignOut = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await signOut();
+      setUser(null);
+      setUserData(null);
+      setUserStats(null);
+      setDisplayName('');
+      setUsername('');
+      navigation.navigate('Auth');
+    } catch (error) {
+      console.error('Çıkış yapma hatası:', error);
+      Alert.alert(
+        'Çıkış Hatası',
+        'Çıkış yapılırken bir sorun oluştu. Lütfen tekrar deneyin.',
+        [
+          { text: 'Tamam', style: 'cancel' }
+        ]
       );
-    }
-    switch (activeTab) {
-      case 'myTests':
-        return <MyTestsTab tests={myTests} navigation={navigation} isLoading={tabContentLoading} />;
-      case 'stats':
-        return <StatsTab userStats={userStats} isLoading={tabContentLoading} />;
-      case 'activity':
-        return <ActivityTab userActivity={userActivity} isLoading={tabContentLoading} />;
-      case 'achievements':
-        return <AchievementsTab userAchievements={userAchievements} isLoading={tabContentLoading} />;
-      default:
-        return <Text style={styles.emptyTabText}>Bu sekme için içerik bulunamadı.</Text>;
     }
   };
 
-  if (loading && !user) {
+  const onRefresh = useCallback(async () => {
+    try {
+    setRefreshing(true);
+      if (!user) return;
+        
+        // Kullanıcı verilerini çek
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (!userSnap.exists()) {
+          console.error('Kullanıcı verileri bulunamadı');
+          Alert.alert('Hata', 'Kullanıcı verileri yüklenemedi. Lütfen tekrar deneyin.');
+          return;
+        }
+        
+        const userData = userSnap.data();
+
+      // Paralel olarak verileri çek
+      const [gameScoresSnap, createdTestsSnap] = await Promise.all([
+        // Son 15 oyun skoru
+        getDocs(query(
+          collection(db, 'gameScores'),
+          where('userId', '==', user.uid),
+          orderBy('createdAt', 'desc'),
+          limit(15)
+        )),
+        // Oluşturulan testler
+        getDocs(query(
+          collection(db, 'tests'),
+          where('creatorId', '==', user.uid)
+        ))
+      ]);
+
+      // Oyun skorlarını işle
+      const gameScores = gameScoresSnap.docs.map(doc => ({
+          id: doc.id,
+        ...doc.data()
+      }));
+
+      // Test detaylarını toplu olarak çek
+      const testIds = [...new Set(gameScores.map(score => score.testId))];
+      const testSnaps = await Promise.all(
+        testIds.map(testId => getDoc(doc(db, 'tests', testId)))
+      );
+
+      // Test detaylarını bir map'e dönüştür
+      const testDetailsMap = testSnaps.reduce((acc, snap) => {
+        if (snap.exists()) {
+          acc[snap.id] = snap.data();
+        }
+        return acc;
+      }, {});
+
+      // Oyun skorlarını test detaylarıyla birleştir
+      const playedTests = gameScores.map(score => {
+        const testData = testDetailsMap[score.testId] || {};
+            return {
+          id: score.id,
+          testId: score.testId,
+          score: score.score || 0,
+          completionTime: score.completionTime || 0,
+          attemptsCount: score.attemptsCount || 0,
+          completed: score.completed || false,
+          playedAt: score.createdAt?.toDate?.() || new Date(),
+          title: testData.title || 'İsimsiz Test',
+          description: testData.description || 'Açıklama bulunmuyor',
+          thumbnailUrl: testData.thumbnailUrl || null,
+          categoryId: testData.categoryId || null,
+          creatorId: testData.creatorId || null
+            };
+      });
+
+      // İstatistikleri hesapla
+      const totalScore = gameScores.reduce((acc, score) => acc + (score.score || 0), 0);
+      const totalTestsPlayed = gameScores.length;
+      const totalTime = gameScores.reduce((acc, score) => acc + (score.completionTime || 0), 0);
+      const averageTime = totalTestsPlayed > 0 ? Math.round(totalTime / totalTestsPlayed) : 0;
+      const totalTestsCreated = createdTestsSnap.docs.length;
+      const completedTests = gameScores.filter(score => score.completed).length;
+      const successRate = totalTestsPlayed > 0 ? Math.round((completedTests / totalTestsPlayed) * 100) : 0;
+        
+      // Güncellenmiş istatistikleri oluştur
+      const updatedStats = {
+        total_tests_created: totalTestsCreated,
+        total_score_achieved: totalScore,
+        total_tests_played: totalTestsPlayed,
+        average_time: averageTime > 0 ? `${Math.floor(averageTime / 60)}:${(averageTime % 60).toString().padStart(2, '0')}` : '0:00',
+        success_rate: successRate,
+        completed_tests: completedTests
+      };
+        
+        // Verileri state'e kaydet
+        setUserData({
+          ...userData,
+        createdTests: createdTestsSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate?.() || new Date()
+        })),
+        playedTests,
+        badges: userData.badges || []
+        });
+      setUserStats(updatedStats);
+        setDisplayName(userData.displayName || user.displayName || '');
+        setUsername(userData.username || user.email?.split('@')[0] || '');
+    } catch (error) {
+      console.error('Veri yenileme hatası:', error);
+      Alert.alert('Hata', 'Veriler yenilenirken bir hata oluştu: ' + error.message);
+    } finally {
+    setRefreshing(false);
+    }
+  }, [user]);
+  
+  if (loading) {
     return (
-      <SafeAreaView style={[styles.container, styles.centeredMessageContainer]} edges={['top','bottom']}>
+      <SafeAreaView style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={styles.loadingText}>Profil bilgileri yükleniyor...</Text>
       </SafeAreaView>
     );
   }
 
   if (!user) {
     return (
-      <SafeAreaView style={[styles.container, styles.centeredMessageContainer]} edges={['top','bottom']}>
-        <Feather name="user-x" size={60} color={theme.colors.textSecondary} />
-        <Text style={styles.messageText}>Profil bilgilerini görmek için giriş yapın.</Text>
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <Feather name="user-x" size={50} color={theme.colors.textSecondary} />
+        <Text style={styles.loadingText}>Profil bilgilerini görüntülemek için giriş yapın.</Text>
         <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
           <Text style={styles.loginButtonText}>Giriş Yap</Text>
         </TouchableOpacity>
@@ -480,397 +336,914 @@ export default function ProfileScreen({ navigation }) {
     );
   }
 
-  // Main screen content: Tüm ekranı FlatList ile yönetiyoruz
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <FlatList
-        data={[{ id: 'tab_content_wrapper' }]}
-        keyExtractor={item => item.id}
-        ListHeaderComponent={
+  // Profil başlığı
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <View style={styles.avatarWrapper}>
+        {user.photoURL ? (
+                  <Image source={{ uri: user.photoURL }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarFallback}>
+            <Text style={styles.avatarFallbackText}>{(displayName || 'K')[0].toUpperCase()}</Text>
+                  </View>
+                )}
+        {user.emailVerified && (
+                  <View style={styles.verifiedBadge}>
+            <Feather name="check" size={12} color="#fff" />
+          </View>
+        )}
+      </View>
+      <View style={styles.headerInfo}>
+        {isEditing ? (
           <>
-            <ProfileScreenHeader 
-              navigation={navigation} 
-              user={user} 
-              userData={userData} 
-              onEditProfile={() => navigation.navigate('EditProfile')}
+            <TextInput
+              style={styles.editInput}
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder="Adınız"
+              placeholderTextColor={theme.colors.textSecondary}
             />
-            <ProfileTabs activeTab={activeTab} onTabChange={handleTabChange} />
+            <TextInput
+              style={styles.editInput}
+              value={username}
+              onChangeText={setUsername}
+              placeholder="Kullanıcı adı"
+              placeholderTextColor={theme.colors.textSecondary}
+            />
           </>
-        }
-        renderItem={renderActiveTabContent}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.mainScrollContent}
+        ) : (
+          <>
+            <Text style={styles.displayName}>{displayName}</Text>
+            <Text style={styles.username}>@{username}</Text>
+          </>
+        )}
+        <View style={styles.headerBadges}>
+          <View style={styles.joinBadge}>
+            <Feather name="calendar" size={14} color={theme.colors.primary} />
+            <Text style={styles.joinBadgeText}>{formatDate(user.metadata?.creationTime)}</Text>
+          </View>
+          {user.emailVerified && (
+            <View style={styles.verifiedTextBadge}>
+              <Feather name="check" size={12} color={theme.colors.primary} />
+              <Text style={styles.verifiedText}>Doğrulanmış</Text>
+            </View>
+          )}
+          </View>
+            </View>
+      <TouchableOpacity 
+        style={styles.editButton} 
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setIsEditing(!isEditing);
+        }}
+      >
+        <Feather name={isEditing ? 'save' : 'edit-2'} size={20} color={theme.colors.primary} />
+      </TouchableOpacity>
+                </View>
+  );
+
+  // Sekme başlıkları
+  const renderTabs = () => (
+    <View style={styles.tabsContainer}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.tabsScrollContent}
+      >
+      {TABS.map(tab => renderTabButton(tab))}
+      </ScrollView>
+            </View>
+  );
+
+  const renderTabButton = (tab) => {
+    const isActive = activeTab === tab.key;
+    return (
+      <TouchableOpacity
+        key={tab.key}
+        style={[
+          styles.tabButton,
+          isActive && styles.activeTabButton
+        ]}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setActiveTab(tab.key);
+        }}
+      >
+        <Feather 
+          name={tab.icon} 
+          size={18} 
+          color={isActive ? '#000' : theme.colors.textSecondary} 
+        />
+        <Text style={[
+          styles.tabText,
+          isActive && styles.activeTabText
+        ]}>
+          {tab.label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  // Sekme içerikleri
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'tests':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Oluşturduğunuz Testler</Text>
+            {userData?.createdTests?.length > 0 ? (
+              <View style={styles.testListContainer}>
+                <FlatList
+                  data={userData.createdTests}
+                  keyExtractor={(item) => item.id}
+                  numColumns={2}
+                  renderItem={({ item }) => (
+                    <TestCard
+                      test={item}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        navigation.navigate('TestDetail', { testId: item.id });
+                      }}
+                      style={styles.testCard}
+                    />
+                  )}
+                  contentContainerStyle={styles.testListContent}
+                  scrollEnabled={false}
+                />
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Feather name="file-text" size={40} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyText}>Henüz test oluşturmadınız.</Text>
+              </View>
+            )}
+          </View>
+        );
+
+      case 'played':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Oynadıklarınız</Text>
+            {userData?.playedTests?.length > 0 ? (
+              <View style={styles.playedTestsList}>
+                {userData.playedTests.map((test, index) => (
+                  <TouchableOpacity
+                    key={`${test.id}-${index}`}
+                    style={styles.playedTestItem}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      navigation.navigate('TestDetail', { testId: test.testId });
+                    }}
+                  >
+                    <View style={styles.playedTestInfo}>
+                      <Text style={styles.playedTestTitle} numberOfLines={1}>
+                        {test.title || 'İsimsiz Test'}
+                      </Text>
+                      <View style={styles.playedTestStats}>
+                        <View style={styles.playedTestStat}>
+                          <Feather name="award" size={14} color={theme.colors.textSecondary} />
+                          <Text style={styles.playedTestStatText}>
+                            {test.score || 0} puan
+                          </Text>
+                        </View>
+                        <View style={styles.playedTestStat}>
+                          <Feather name="calendar" size={14} color={theme.colors.textSecondary} />
+                          <Text style={styles.playedTestStatText}>
+                            {formatDate(test.playedAt)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Feather name="play" size={40} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyText}>Henüz test oynamadınız.</Text>
+              </View>
+            )}
+          </View>
+        );
+
+      case 'stats':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>İstatistikler</Text>
+            <View style={styles.statsContainer}>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="award" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{userStats?.total_score_achieved || 0}</Text>
+                    <Text style={styles.statLabel}>Toplam Puan</Text>
+                  </View>
+                </View>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="play" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{userStats?.total_tests_played || 0}</Text>
+                    <Text style={styles.statLabel}>Oynanan Test</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="clock" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{userStats?.average_time || '0:00'}</Text>
+                    <Text style={styles.statLabel}>Ortalama Süre</Text>
+                  </View>
+                </View>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="edit" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{userStats?.total_tests_created || 0}</Text>
+                    <Text style={styles.statLabel}>Oluşturulan Test</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="check-circle" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{userStats?.completed_tests || 0}</Text>
+                    <Text style={styles.statLabel}>Tamamlanan Test</Text>
+                  </View>
+                </View>
+                <View style={styles.statCard}>
+                  <View style={styles.statIconContainer}>
+                    <Feather name="trending-up" size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>%{userStats?.success_rate || 0}</Text>
+                    <Text style={styles.statLabel}>Başarı Oranı</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+        );
+
+      case 'badges':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Rozetler</Text>
+            <View style={styles.comingSoonContainer}>
+              <Feather name="award" size={48} color={theme.colors.textSecondary} />
+              <Text style={styles.comingSoonTitle}>Yakında</Text>
+              <Text style={styles.comingSoonDescription}>
+                Rozet sistemi yakında aktif olacak. Başarılarınızı rozetlerle sergileyin!
+              </Text>
+            </View>
+          </View>
+        );
+
+      case 'account':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Hesap Ayarları</Text>
+            <View style={styles.accountCard}>
+              <View style={styles.accountItem}>
+                <View style={styles.accountItemLeft}>
+                  <Feather name="mail" size={20} color={theme.colors.primary} />
+                  <View style={styles.accountItemContent}>
+                    <Text style={styles.accountItemLabel}>E-posta</Text>
+                    <Text style={styles.accountItemText}>{user.email}</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={styles.accountItem}>
+                <View style={styles.accountItemLeft}>
+                  <Feather name="shield" size={20} color={theme.colors.primary} />
+                  <View style={styles.accountItemContent}>
+                    <Text style={styles.accountItemLabel}>E-posta Doğrulama</Text>
+                    <Text style={styles.accountItemText}>
+                      {user.emailVerified ? 'Doğrulanmış' : 'Doğrulanmamış'}
+                    </Text>
+                  </View>
+                </View>
+                {!user.emailVerified && (
+                  <TouchableOpacity 
+                    style={styles.verifyButton}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      // E-posta doğrulama işlemi
+                    }}
+                  >
+                    <Text style={styles.verifyButtonText}>Doğrula</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity 
+                style={styles.signOutButton} 
+                onPress={handleSignOut}
+              >
+                <Feather name="log-out" size={20} color="#F87171" />
+                <Text style={styles.signOutText}>Çıkış Yap</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            navigation.goBack();
+          }}
+        >
+          <Feather name="arrow-left" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Profil</Text>
+        <View style={styles.headerRight} />
+      </View>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            colors={[theme.colors.primary]} 
+            tintColor={theme.colors.primary} 
           />
         }
-        ListFooterComponent={
-          !loading && !refreshing && !tabContentLoading && (
-            <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-              <Feather name="log-out" size={18} color={theme.colors.error} />
-              <Text style={styles.signOutButtonText}>Çıkış Yap</Text>
-            </TouchableOpacity>
-          )
-        }
-      />
+        showsVerticalScrollIndicator={false}
+      >
+        {renderHeader()}
+        {renderTabs()}
+        {renderTabContent()}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// --- Styles --- (Assuming a dark theme from Pixelhunt reference)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.backgroundDark || '#121212', // Darker background
+    backgroundColor: '#000',
   },
-  mainScrollContent: {
-    paddingBottom: theme.spacing.xxl,
+  centered: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
   },
-  centeredMessageContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-    backgroundColor: theme.colors.backgroundDark || '#121212',
+  loadingText: { 
+    marginTop: 10, 
+    fontSize: 16, 
+    color: theme.colors.textSecondary,
+    fontFamily: 'Outfit_400Regular',
   },
-  messageText: {
-    marginTop: theme.spacing.lg,
-    fontSize: 17,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    textAlign: 'center',
-  },
-  loginButton: {
-    marginTop: theme.spacing.xl,
-    backgroundColor: theme.colors.primary,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.xxl,
-    borderRadius: theme.borderRadius.lg,
-  },
-  loginButtonText: {
-    color: theme.colors.primaryForegroundOnDark || theme.colors.backgroundDark, // Dark text on primary
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  // Profile Header Card
-  profileHeaderCard: {
-    backgroundColor: theme.colors.cardDark || '#1E1E1E', // Dark card
-    marginHorizontal: HORIZONTAL_PADDING,
-    marginTop: theme.spacing.md,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing.lg,
-    marginBottom: theme.spacing.md,
-  },
-  profileHeaderTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.md,
-  },
-  profileHeaderAvatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: theme.colors.primary, // Yellow background for avatar
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: theme.spacing.md,
-  },
-  profileHeaderAvatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 40,
-  },
-  profileHeaderDefaultAvatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.primary,
-  },
-  profileHeaderAvatarLetter: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: theme.colors.primaryForegroundOnDark || theme.colors.backgroundDark,
-  },
-  profileHeaderTextContainer: {
-    flex: 1,
-  },
-  profileHeaderNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.xs / 2,
-  },
-  profileHeaderDisplayName: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: theme.colors.textOnDark || '#E0E0E0',
-  },
-  verifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.success || '#4CAF50', // Green badge
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs / 2,
-    borderRadius: theme.borderRadius.md,
-    marginLeft: theme.spacing.sm,
-  },
-  verifiedBadgeText: {
-    color: theme.colors.background, // White text on green badge
-    fontSize: 11,
-    fontWeight: 'bold',
-    marginLeft: theme.spacing.xs / 2,
-  },
-  profileHeaderUsername: {
-    fontSize: 15,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-  },
-  profileHeaderMetaRow: {
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.md,
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.xs,
-  },
-  metaText: {
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    fontSize: 13,
-    marginLeft: theme.spacing.sm,
-  },
-  editProfileButton: {
-    backgroundColor: theme.colors.cardSlightlyLighterDark || '#2A2A2A', // Darker button
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.sm + 2,
-    borderRadius: theme.borderRadius.md,
+  loginButton: { 
+    marginTop: 16, 
+    backgroundColor: theme.colors.primary, 
+    borderRadius: 8, 
+    paddingVertical: 10, 
+    paddingHorizontal: 24,
     borderWidth: 1,
-    borderColor: theme.colors.borderDark || '#333333',
+    borderColor: theme.colors.primary + '40',
   },
-  editProfileButtonText: {
-    color: theme.colors.primaryForeground || theme.colors.textOnDark, // Text color for this button
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: theme.spacing.sm,
+  loginButtonText: { 
+    color: '#fff', 
+    fontWeight: 'bold', 
+    fontSize: 16,
+    fontFamily: 'Outfit_700Bold',
   },
-  // Icon Tabs
-  iconTabsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+  headerContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 20, 
+    borderRadius: 16, 
+    margin: 16,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  avatarWrapper: { 
+    marginRight: 16, 
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  avatar: { 
+    width: 70, 
+    height: 70, 
+    borderRadius: 35, 
+    borderWidth: 3, 
+    borderColor: theme.colors.primary,
+  },
+  avatarFallback: { 
+    width: 70, 
+    height: 70, 
+    borderRadius: 35, 
+    justifyContent: 'center', 
     alignItems: 'center',
-    backgroundColor: theme.colors.cardDark || '#1E1E1E',
-    marginHorizontal: HORIZONTAL_PADDING,
-    borderRadius: theme.borderRadius.lg,
-    paddingVertical: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
+    borderWidth: 3,
+    borderColor: theme.colors.primary + '40',
   },
-  iconTab: {
-    padding: theme.spacing.sm,
+  avatarFallbackText: { 
+    color: '#fff', 
+    fontSize: 32, 
+    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
+  },
+  verifiedBadge: { 
+    position: 'absolute', 
+    bottom: 0, 
+    right: 0, 
+    borderRadius: 10, 
+    width: 20, 
+    height: 20, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderWidth: 2, 
+    borderColor: '#fff',
+    backgroundColor: '#000',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  headerInfo: { 
+    flex: 1,
+    justifyContent: 'center',
+  },
+  displayName: {
+    fontSize: 24,
+    color: '#fff',
+    marginBottom: 4,
+    fontFamily: 'Outfit_700Bold',
+  },
+  username: {
+    fontSize: 16,
+    color: '#71717A',
+    marginBottom: 16,
+    fontFamily: 'Outfit_400Regular',
+  },
+  headerBadges: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginTop: 8,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  joinBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    borderRadius: 8, 
+    paddingHorizontal: 8, 
+    paddingVertical: 4, 
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  joinBadgeText: { 
+    color: theme.colors.textSecondary, 
+    fontSize: 12, 
+    marginLeft: 4,
+    fontFamily: 'Outfit_400Regular',
+  },
+  verifiedTextBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    borderRadius: 8, 
+    paddingHorizontal: 8, 
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  verifiedText: { 
+    color: theme.colors.textSecondary, 
+    fontSize: 12, 
+    marginLeft: 4,
+    fontFamily: 'Outfit_400Regular',
+  },
+  editButton: { 
+    marginLeft: 8, 
+    padding: 8, 
+    borderRadius: 8, 
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  editInput: { 
+    color: '#fff', 
+    borderRadius: 8, 
+    padding: 8, 
+    marginBottom: 6, 
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  tabsContainer: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    fontFamily: 'Outfit_400Regular',
+  },
+  tabsScrollContent: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  tabButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: theme.borderRadius.md, // Rounded background for active tab
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginHorizontal: 4,
+    gap: 6,
   },
-  activeIconTab: {
-    backgroundColor: theme.colors.backgroundDark || '#121212', // Active tab background
+  activeTabButton: {
+    backgroundColor: theme.colors.primary,
   },
-  // Tab Content Generic Styles
-  tabContentLoadingIndicator: {
-    marginVertical: theme.spacing.xl,
+  tabText: {
+    fontSize: 14,
+    color: '#71717A',
+    fontFamily: 'Outfit_400Regular',
   },
-  emptyTabText: {
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    textAlign: 'center',
-    padding: theme.spacing.lg,
-    fontSize: 15,
+  activeTabText: {
+    color: '#000',
+    fontFamily: 'Outfit_400Regular',
   },
-  contentCard: {
-    backgroundColor: theme.colors.cardDark || '#1E1E1E',
-    marginHorizontal: HORIZONTAL_PADDING,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
-  },
-  contentCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.xs,
-  },
-  contentCardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: theme.colors.textOnDark || '#E0E0E0',
-    marginLeft: theme.spacing.sm,
-  },
-  contentCardSubtitle: {
-    fontSize: 13,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    marginBottom: theme.spacing.md,
-  },
-  errorContainer: {
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-  },
-  errorText: {
-      color: theme.colors.error,
-      textAlign: 'center',
-      marginVertical: theme.spacing.md,
-      fontSize: 15,
-  },
-  retryButton: {
-      backgroundColor: theme.colors.primary,
-      paddingVertical: theme.spacing.sm,
-      paddingHorizontal: theme.spacing.lg,
-      borderRadius: theme.borderRadius.md,
-  },
-  retryButtonText: {
-      color: theme.colors.primaryForegroundOnDark || theme.colors.backgroundDark,
-      fontWeight: 'bold',
-  },
-  // MyTestsTab Styles
-  testsGrid: {
-    // No specific style needed if FlatList handles padding via contentContainerStyle
-    // marginHorizontal: -CARD_SPACING_TESTS / 2, // If using padding on parent
-  },
-  gridTestCard: {
-    marginBottom: CARD_SPACING_TESTS,
-  },
-  // StatsTab Styles
-  statsHighlightRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: theme.spacing.lg,
-  },
-  statsHighlightItem: {
-    alignItems: 'center',
-    backgroundColor: theme.colors.backgroundDark || '#121212',
-    padding: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
+  scroll: {
     flex: 1,
-    marginHorizontal: theme.spacing.xs,
   },
-  statsHighlightLabel: {
-    fontSize: 13,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    marginBottom: theme.spacing.xs,
+  scrollContent: {
+    paddingBottom: 32,
   },
-  statsHighlightValue: {
+  testCard: {
+    width: '48%',
+    marginHorizontal: '1%',
+    marginBottom: 16,
+  },
+  testListContent: {
+    paddingBottom: 16,
+  },
+  section: { 
+    marginTop: 24, 
+    marginHorizontal: 16, 
+    borderRadius: 12, 
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    color: '#fff',
+    marginBottom: 16,
+    fontFamily: 'Outfit_700Bold',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#71717A',
+    textAlign: 'center',
+    fontFamily: 'Outfit_400Regular',
+  },
+  statsContainer: {
+    marginTop: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  statCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181B',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  statIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.colors.primary + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  statContent: {
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 18,
+    color: '#fff',
+    marginBottom: 2,
+    fontFamily: 'Outfit_700Bold',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#71717A',
+    fontFamily: 'Outfit_400Regular',
+  },
+  badgesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -8,
+    marginTop: 8,
+  },
+  badgeCard: {
+    width: '50%',
+    padding: 8,
+  },
+  badgeIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+  },
+  badgeTitle: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 8,
+    fontFamily: 'Outfit_700Bold',
+  },
+  badgeDescription: {
+    fontSize: 14,
+    color: '#71717A',
+    fontFamily: 'Outfit_400Regular',
+  },
+  accountCard: {
+    backgroundColor: '#18181B',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  accountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  accountItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  accountItemContent: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  accountItemLabel: {
+    fontSize: 14,
+    color: '#71717A',
+    marginBottom: 4,
+    fontFamily: 'Outfit_400Regular',
+  },
+  accountItemText: {
+    fontSize: 16,
+    color: '#fff',
+    fontFamily: 'Outfit_400Regular',
+  },
+  verifyButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary + '20',
+    borderWidth: 1,
+    borderColor: theme.colors.primary + '40',
+  },
+  verifyButtonText: {
+    color: theme.colors.primary,
+    fontSize: 14,
+    fontFamily: 'Outfit_700Bold',
+  },
+  signOutButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginTop: 24,
+    backgroundColor: '#FCA5A520',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    gap: 8,
+  },
+  signOutText: { 
+    color: '#F87171', 
+    fontSize: 16, 
+    fontFamily: 'Outfit_700Bold',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272A',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#18181B',
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  headerTitle: {
+    fontSize: 18,
+    color: '#fff',
+    textAlign: 'center',
+    fontFamily: 'Outfit_700Bold',
+  },
+  headerRight: {
+    width: 40,
+  },
+  testListContainer: {
+    flex: 1,
+  },
+  recentBadgesContainer: {
+    marginBottom: 24,
+  },
+  recentBadgesTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+    fontFamily: 'Outfit_600SemiBold',
+  },
+  recentBadgesList: {
+    gap: 12,
+  },
+  recentBadgeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#18181B',
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  recentBadgeInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  badgeDate: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginTop: 4,
+    fontFamily: 'Outfit_400Regular',
+  },
+  badgeTitleLocked: {
+    color: theme.colors.textSecondary,
+  },
+  badgeDescriptionLocked: {
+    color: theme.colors.textSecondary,
+    opacity: 0.7,
+  },
+  comingSoonBadge: {
+    backgroundColor: '#27272A',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  comingSoonText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'Outfit_400Regular',
+  },
+  comingSoonContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+    backgroundColor: '#18181B',
+  },
+  comingSoonTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: theme.colors.textOnDark || '#E0E0E0',
+    color: '#fff',
+    marginTop: 16,
+    marginBottom: 8,
+    fontFamily: 'Outfit_700Bold',
   },
-  subSectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: theme.colors.textOnDark || '#E0E0E0',
-    marginBottom: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  gameModeStatRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.borderDark || '#333333',
-  },
-  gameModeName: {
+  comingSoonDescription: {
     fontSize: 14,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+    fontFamily: 'Outfit_400Regular',
   },
-  gameModeCount: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: theme.colors.textOnDark || '#E0E0E0',
+  playedTestsList: {
+    marginTop: 8,
   },
-  // ActivityTab Styles
-  activityItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.borderDark || '#333333',
-  },
-  activityText: {
-    flex: 1,
-    fontSize: 14,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    marginRight: theme.spacing.sm,
-    lineHeight: 20,
-  },
-  activityDate: {
-    fontSize: 12,
-    color: theme.colors.textDisabledOnDark || '#757575',
-  },
-   // AchievementsTab Styles
-   achievementItem: {
+  playedTestItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.borderDark || '#333333',
-  },
-  achievementTextContainer: {
-    flex: 1,
-    marginLeft: theme.spacing.md,
-  },
-  achievementName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: theme.colors.textOnDark || '#E0E0E0',
-  },
-  achievementNotEarned: {
-    color: theme.colors.textDisabledOnDark || '#757575',
-  },
-  achievementDescription: {
-    fontSize: 12,
-    color: theme.colors.textSecondaryOnDark || '#A0A0A0',
-    marginTop: theme.spacing.xs / 2,
-  },
-  achievementPoints: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: theme.colors.primary,
-  },
-  totalScoreBadge: {
-    backgroundColor: theme.colors.primary, // Yellow badge
-    borderRadius: theme.borderRadius.lg,
-    paddingVertical: theme.spacing.lg,
-    paddingHorizontal: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: theme.spacing.lg,
-  },
-  totalScoreBadgeLabel: {
-    fontSize: 14,
-    color: theme.colors.primaryForegroundOnDark || theme.colors.backgroundDark,
-    marginBottom: theme.spacing.xs,
-  },
-  totalScoreBadgeValue: {
-    fontSize: 30,
-    fontWeight: 'bold',
-    color: theme.colors.primaryForegroundOnDark || theme.colors.backgroundDark,
-  },
-  // Sign Out Button
-  signOutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: HORIZONTAL_PADDING,
-    marginVertical: theme.spacing.xl,
-    paddingVertical: theme.spacing.md,
-    backgroundColor: theme.colors.cardDark || '#1E1E1E',
-    borderRadius: theme.borderRadius.lg,
+    padding: 12,
+    backgroundColor: '#18181B',
+    borderRadius: 12,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: theme.colors.errorMutedOnDark || theme.colors.error,
+    borderColor: '#27272A',
   },
-  signOutButtonText: {
-    color: theme.colors.error,
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginLeft: theme.spacing.sm,
+  playedTestInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  playedTestTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 6,
+    fontFamily: 'Outfit_600SemiBold',
+  },
+  playedTestStats: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  playedTestStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  playedTestStatText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontFamily: 'Outfit_400Regular',
   },
 });

@@ -12,15 +12,20 @@ import {
   ImageBackground, // For cover image with overlay
   TextInput,
   FlatList,
-  Share
+  Share,
+  Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme'; // Assuming your theme is set up for dark mode
-import { fetchUserDocument, fetchTestById } from '../config/firebase';
-import { getAuth } from 'firebase/auth';
-import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import { fetchUserDocument, fetchTestById, auth } from '../config/firebase';
+import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, doc, updateDoc, increment, deleteDoc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import TestCard from '../components/TestCard';
+
+const { width } = Dimensions.get('window');
+const testCardWidth = width * 0.40;
 
 // Helper to format date, assuming createdAt is a Firestore Timestamp or parsable date string
 const formatDate = (timestamp) => {
@@ -47,6 +52,118 @@ const ScreenHeader = ({ navigation, title }) => (
   </View>
 );
 
+const CommentItem = ({ comment }) => {
+  const [userData, setUserData] = useState(null);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (comment.userId) {
+        try {
+          const userDoc = await fetchUserDocument(comment.userId);
+          setUserData(userDoc);
+        } catch (error) {
+          console.error('Kullanıcı bilgileri alınamadı:', error);
+        }
+      }
+    };
+
+    fetchUserData();
+  }, [comment.userId]);
+
+  return (
+    <View style={styles.commentItem}>
+      {userData?.photoURL ? (
+        <Image 
+          source={{ uri: userData.photoURL }} 
+          style={styles.commentUserAvatar}
+        />
+      ) : (
+        <View style={styles.commentUserAvatarPlaceholder}>
+          <Feather name="user" size={20} color={theme.colors.textSecondary} />
+        </View>
+      )}
+      <View style={styles.commentContent}>
+        <Text style={styles.commentUser}>
+          {userData?.displayName || comment.userName || 'Anonim Kullanıcı'}
+        </Text>
+        <Text style={styles.commentText}>{comment.comment}</Text>
+        <Text style={styles.commentDate}>
+          {formatDate(comment.createdAt)}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+// Benzer testleri getiren fonksiyon
+const getSimilarTests = async (testId) => {
+  try {
+    // Önce mevcut testin bilgilerini al
+    const testRef = doc(db, 'tests', testId);
+    const testDoc = await getDoc(testRef);
+    
+    if (!testDoc.exists()) return [];
+    
+    const currentTest = testDoc.data();
+    const categoryId = currentTest.categoryId || (currentTest.category && currentTest.category.id);
+    
+    if (!categoryId) return [];
+    
+    // Aynı kategorideki diğer testleri getir
+    const testsRef = collection(db, 'tests');
+    const q = query(
+      testsRef,
+      where('categoryId', '==', categoryId),
+      orderBy('playCount', 'desc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    
+    // Mevcut testi filtrele ve sonuçları döndür
+    return querySnapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }))
+      .filter(test => test.id !== testId)
+      .slice(0, 4);
+  } catch (error) {
+    console.error('Benzer testler alınırken hata:', error);
+    return [];
+  }
+};
+
+// Benzer test kartı bileşeni
+const SimilarTestCard = ({ test, onPress }) => (
+  <TouchableOpacity 
+    style={styles.similarTestCard} 
+    onPress={onPress}
+  >
+    <ImageBackground
+      source={test.thumbnailUrl ? { uri: test.thumbnailUrl } : require('../assets/placeholder.png')}
+      style={styles.similarTestImage}
+      imageStyle={styles.similarTestImageStyle}
+    >
+      <View style={styles.similarTestOverlay} />
+    </ImageBackground>
+    <View style={styles.similarTestInfo}>
+      <Text style={styles.similarTestTitle} numberOfLines={1}>
+        {test.title}
+      </Text>
+      <View style={styles.similarTestStats}>
+        <View style={styles.similarTestStat}>
+          <Feather name="play" size={14} color={theme.colors.textSecondary} />
+          <Text style={styles.similarTestStatText}>{test.playCount || 0}</Text>
+        </View>
+        <View style={styles.similarTestStat}>
+          <Feather name="heart" size={14} color={theme.colors.textSecondary} />
+          <Text style={styles.similarTestStatText}>{test.likeCount || 0}</Text>
+        </View>
+      </View>
+    </View>
+  </TouchableOpacity>
+);
+
 const TestDetailScreen = ({ route, navigation }) => {
   const { test: initialTest, testId } = route.params || {};
   const [test, setTest] = useState(initialTest || null);
@@ -59,7 +176,9 @@ const TestDetailScreen = ({ route, navigation }) => {
   const [commentInput, setCommentInput] = useState('');
   const [commentLoading, setCommentLoading] = useState(false);
   const [commentsLoading, setCommentsLoading] = useState(true);
-  const user = getAuth().currentUser;
+  const [similarTests, setSimilarTests] = useState([]);
+  const [similarTestsLoading, setSimilarTestsLoading] = useState(true);
+  const { user } = useAuth();
 
   const loadTestDetails = useCallback(async (id) => {
     setLoading(true);
@@ -119,21 +238,69 @@ const TestDetailScreen = ({ route, navigation }) => {
     setLikeCount(test?.likeCount || 0);
   }, [test]);
 
+  // Beğeni durumunu kontrol et
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      if (!user || !test?.id) return;
+      
+      try {
+        const likeQuery = query(
+          collection(db, 'testLikes'),
+          where('testId', '==', test.id),
+          where('userId', '==', user.uid)
+        );
+        
+        const querySnapshot = await getDocs(likeQuery);
+        setLiked(!querySnapshot.empty);
+      } catch (error) {
+        console.error('Beğeni durumu kontrol edilirken hata:', error);
+      }
+    };
+
+    checkLikeStatus();
+  }, [user, test?.id]);
+
   // Yorumları Firestore'dan çek
   const fetchComments = async (testId) => {
     setCommentsLoading(true);
     try {
+      const commentsRef = collection(db, 'testComments');
       const q = query(
-        collection(db, 'testComments'),
+        commentsRef,
         where('testId', '==', testId),
         orderBy('createdAt', 'desc')
       );
+      
       const querySnapshot = await getDocs(q);
-      setComments(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    } catch (e) {
+      const comments = [];
+      
+      for (const doc of querySnapshot.docs) {
+        const commentData = doc.data();
+        console.log('Yorum verisi:', commentData); // Debug log
+        
+        // Kullanıcı bilgilerini al
+        const userDoc = await fetchUserDocument(commentData.userId);
+        console.log('Yorum kullanıcı verisi:', userDoc); // Debug log
+        
+        comments.push({
+          id: doc.id,
+          ...commentData,
+          createdAt: commentData.createdAt?.toDate(),
+          user: userDoc ? {
+            displayName: userDoc.displayName,
+            avatarUrl: userDoc.avatarUrl || userDoc.photoURL,
+            username: userDoc.username
+          } : null
+        });
+      }
+      
+      setComments(comments);
+    } catch (error) {
+      console.error('Yorumlar alınamadı:', error);
       setComments([]);
+    } finally {
+      setCommentsLoading(false);
     }
-    setCommentsLoading(false);
   };
 
   // Yorum ekle
@@ -163,11 +330,69 @@ const TestDetailScreen = ({ route, navigation }) => {
     setCommentLoading(false);
   };
 
-  // Beğenme (örnek, backend ile entegre edilmeli)
-  const handleLike = () => {
-    setLiked(!liked);
-    setLikeCount(prev => liked ? prev - 1 : prev + 1);
-    // TODO: Firestore'da güncelleme yapılmalı
+  // Beğenme işlemi
+  const handleLike = async () => {
+    if (!user) {
+      Alert.alert(
+        'Giriş Yapmalısınız',
+        'Testi beğenmek için giriş yapmalısınız.',
+        [{ text: 'Tamam' }]
+      );
+      return;
+    }
+
+    try {
+      const testRef = doc(db, 'tests', test.id);
+      const likeRef = collection(db, 'testLikes');
+      
+      if (liked) {
+        // Beğeniyi kaldır
+        const likeQuery = query(
+          likeRef,
+          where('testId', '==', test.id),
+          where('userId', '==', user.uid)
+        );
+        const querySnapshot = await getDocs(likeQuery);
+        
+        if (!querySnapshot.empty) {
+          const likeDoc = querySnapshot.docs[0];
+          await deleteDoc(doc(likeRef, likeDoc.id));
+          await updateDoc(testRef, {
+            likeCount: increment(-1)
+          });
+          setLiked(false);
+          setLikeCount(prev => prev - 1);
+        }
+      } else {
+        // Beğeni ekle
+        await addDoc(likeRef, {
+          testId: test.id,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+        
+        await updateDoc(testRef, {
+          likeCount: increment(1)
+        });
+
+        // Kullanıcı aktivitesini kaydet
+        await addDoc(collection(db, 'userActivities'), {
+          userId: user.uid,
+          userName: user.displayName || user.email?.split('@')[0],
+          activityType: 'like_test',
+          details: `Teste beğeni verildi: ${test.title}`,
+          entityId: test.id,
+          entityType: 'test',
+          createdAt: serverTimestamp()
+        });
+
+        setLiked(true);
+        setLikeCount(prev => prev + 1);
+      }
+    } catch (error) {
+      console.error('Beğeni işlemi sırasında hata:', error);
+      Alert.alert('Hata', 'Beğeni işlemi sırasında bir hata oluştu.');
+    }
   };
 
   // Paylaş
@@ -180,6 +405,29 @@ const TestDetailScreen = ({ route, navigation }) => {
       Alert.alert('Paylaşım başarısız');
     }
   };
+
+  // Benzer testleri yükle
+  const loadSimilarTests = useCallback(async (testId) => {
+    if (!testId) return;
+    
+    setSimilarTestsLoading(true);
+    try {
+      const tests = await getSimilarTests(testId);
+      setSimilarTests(tests);
+    } catch (error) {
+      console.error('Benzer testler yüklenirken hata:', error);
+      setSimilarTests([]);
+    } finally {
+      setSimilarTestsLoading(false);
+    }
+  }, []);
+
+  // Test değiştiğinde benzer testleri yükle
+  useEffect(() => {
+    if (test?.id) {
+      loadSimilarTests(test.id);
+    }
+  }, [test?.id, loadSimilarTests]);
 
   if (loading) {
     return (
@@ -242,11 +490,25 @@ const TestDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
           
-          {/* Like and Share buttons - visual placeholders */}
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={[styles.iconButton, { backgroundColor: theme.colors.primary }]} onPress={handleLike}>
-              <Feather name={liked ? 'heart' : 'heart'} size={20} color={liked ? theme.colors.error : theme.colors.primaryForeground} />
-              <Text style={styles.iconButtonText}>{likeCount}</Text>
+            <TouchableOpacity 
+              style={[
+                styles.iconButton, 
+                liked && { backgroundColor: theme.colors.primary }
+              ]} 
+              onPress={handleLike}
+            >
+              <Feather 
+                name="thumbs-up" 
+                size={20} 
+                color={liked ? theme.colors.primaryForeground : theme.colors.text} 
+              />
+              <Text style={[
+                styles.iconButtonText,
+                liked && { color: theme.colors.primaryForeground }
+              ]}>
+                {likeCount}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={handleShare}>
               <Feather name="share-2" size={20} color={theme.colors.text} />
@@ -261,7 +523,7 @@ const TestDetailScreen = ({ route, navigation }) => {
               <Text style={styles.statText}>{(test.playCount || 0).toLocaleString()} Oynanma</Text>
             </View>
             <View style={styles.statItem}>
-              <Feather name="heart" size={18} color={theme.colors.textSecondary} />
+              <Feather name="thumbs-up" size={18} color={theme.colors.textSecondary} />
               <Text style={styles.statText}>{(test.likeCount || 0).toLocaleString()} Beğeni</Text>
             </View>
             <View style={styles.statItem}>
@@ -272,7 +534,7 @@ const TestDetailScreen = ({ route, navigation }) => {
 
           <TouchableOpacity
             style={styles.startButton}
-            onPress={() => navigation.navigate('Game', { testId: test.id, testTitle: test.title })} // Pass ID and title
+            onPress={() => navigation.navigate('Game', { test: test })}
           >
             <Feather name="play" size={20} color={theme.colors.background} />
             <Text style={styles.startButtonText}>Testi Başlat</Text>
@@ -336,21 +598,48 @@ const TestDetailScreen = ({ route, navigation }) => {
           ) : comments.length === 0 ? (
             <Text style={styles.noComments}>Henüz yorum yapılmamış. İlk yorumu sen yap!</Text>
           ) : (
-            <FlatList
-              data={comments}
-              keyExtractor={item => item.id}
-              renderItem={({ item }) => (
-                <View style={styles.commentItem}>
-                  <MaterialCommunityIcons name="account-circle" size={28} color={theme.colors.textSecondary} />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={styles.commentUser}>{item.userName || 'Kullanıcı'}</Text>
-                    <Text style={styles.commentText}>{item.comment}</Text>
+            <View style={styles.commentsList}>
+              {comments.map((comment, idx) => (
+                <View
+                  key={comment.id}
+                  style={[
+                    styles.commentContainer,
+                    idx === comments.length - 1 && { borderBottomWidth: 0 } // Sonuncu yorumda çizgi olmasın
+                  ]}
+                >
+                  <View style={styles.commentHeader}>
+                    <View style={styles.commentUserInfo}>
+                      {comment.user?.avatarUrl ? (
+                        <Image
+                          source={{ uri: comment.user.avatarUrl }}
+                          style={styles.commentAvatar}
+                          onError={(e) => {
+                            console.log('Avatar yüklenemedi:', e.nativeEvent.error);
+                            console.log('Avatar URL:', comment.user.avatarUrl);
+                          }}
+                        />
+                      ) : (
+                        <View style={[styles.commentAvatar, styles.commentAvatarFallback]}>
+                          <Text style={styles.commentAvatarText}>
+                            {(comment.user?.displayName || comment.user?.username || 'K')[0].toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <View>
+                        <Text style={styles.commentUsername}>
+                          {comment.user?.displayName || comment.user?.username || 'Anonim Kullanıcı'}
+                        </Text>
+                        <Text style={styles.commentDate}>
+                          {comment.createdAt ? formatDate(comment.createdAt) : 'Tarih yok'}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
+                  <Text style={styles.commentText}>{comment.comment}</Text>
                 </View>
-              )}
-            />
+              ))}
+            </View>
           )}
-          {/* Yorum ekleme alanı */}
           {user && (
             <View style={styles.addCommentBox}>
               <TextInput
@@ -360,13 +649,49 @@ const TestDetailScreen = ({ route, navigation }) => {
                 value={commentInput}
                 onChangeText={setCommentInput}
                 editable={!commentLoading}
+                multiline
               />
-              <TouchableOpacity style={styles.addCommentButton} onPress={handleAddComment} disabled={commentLoading}>
-                <Text style={styles.addCommentButtonText}>Gönder</Text>
+              <TouchableOpacity 
+                style={[
+                  styles.addCommentButton,
+                  commentLoading && styles.addCommentButtonDisabled
+                ]} 
+                onPress={handleAddComment} 
+                disabled={commentLoading || !commentInput.trim()}
+              >
+                {commentLoading ? (
+                  <ActivityIndicator size="small" color={theme.colors.primaryForeground} />
+                ) : (
+                  <Text style={styles.addCommentButtonText}>Gönder</Text>
+                )}
               </TouchableOpacity>
             </View>
           )}
         </View>
+
+        {/* Benzer Testler */}
+        {similarTests.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Benzer Testler</Text>
+            </View>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.similarTestsContainer}
+            >
+              {similarTests.map((similarTest) => (
+                <View key={similarTest.id} style={styles.similarTestCardWrapper}>
+                  <TestCard
+                    test={similarTest}
+                    onPress={() => navigation.push('TestDetail', { testId: similarTest.id })}
+                    style={[styles.similarTestCard, { width: testCardWidth }]}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
       </ScrollView>
     </SafeAreaView>
@@ -385,7 +710,7 @@ const TestDetailScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background, // Dark background
+    backgroundColor: '#000',
   },
   centeredContainer: {
     justifyContent: 'center',
@@ -420,283 +745,415 @@ const styles = StyleSheet.create({
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.sm, // Less horizontal padding for header buttons
-    paddingVertical: theme.spacing.md,
-    backgroundColor: theme.colors.card, // Or theme.colors.background
+    justifyContent: 'space-between',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: '#27272A',
   },
   headerButton: {
-    padding: theme.spacing.sm,
-    minWidth: 40, // Ensure tappable area
+    width: 40,
+    height: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    flex: 1,
-    color: theme.colors.text,
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '400',
+    color: '#fff',
+    flex: 1,
     textAlign: 'center',
-    marginHorizontal: theme.spacing.sm,
+    marginHorizontal: 16,
+    fontFamily: 'Outfit_400Regular',
   },
   scrollContent: {
-    padding: theme.spacing.md, // Consistent padding for scrollable content
+    flexGrow: 1,
+    padding: 16,
+    paddingBottom: 32,
   },
   mainContentCard: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing.lg,
-    overflow: 'hidden', // Important for cover image border radius
-    paddingBottom: theme.spacing.md, // Space for elements inside the card
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#27272A',
   },
   coverImage: {
     width: '100%',
-    height: 220, // Adjusted height
-    justifyContent: 'flex-end', // For the badge
-    alignItems: 'flex-start', // For the badge
+    height: 220,
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
   },
   questionCountBadge: {
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.borderRadius.sm,
-    margin: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    backgroundColor: '#000',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    margin: 12,
   },
   questionCountText: {
-    color: theme.colors.white,
+    color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
   },
   titleSection: {
-    paddingHorizontal: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    // No padding bottom here, actionsRow or description will provide it
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   title: {
-    color: theme.colors.text,
-    fontSize: 24, // Larger title
-    fontWeight: 'bold',
-    marginBottom: theme.spacing.sm,
+    fontSize: 24,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 8,
+    fontFamily: 'Outfit_700Bold',
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.md,
+    marginBottom: 12,
+    flexWrap: 'wrap',
   },
   metaText: {
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     fontSize: 13,
-    marginLeft: theme.spacing.xs,
+    marginLeft: 4,
+    fontFamily: 'Outfit_400Regular',
   },
   metaSeparator: {
-    color: theme.colors.textSecondary,
-    marginHorizontal: theme.spacing.sm,
+    color: '#71717A',
+    marginHorizontal: 8,
     fontSize: 13,
   },
   actionsRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-start', // Align to left, like screenshot's like button
+    justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.md,
-    marginBottom: theme.spacing.md,
-    gap: theme.spacing.sm,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    gap: 10,
   },
   iconButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.background, // Or slightly different shade from card
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#27272A',
   },
   iconButtonText: {
-    color: theme.colors.primaryForeground, // Text for the primary like button
-    marginLeft: theme.spacing.xs,
+    color: '#fff',
+    marginLeft: 4,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    fontFamily: 'Outfit_700Bold',
   },
   description: {
-    color: theme.colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
-    paddingHorizontal: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
+    fontSize: 16,
+    color: '#71717A',
+    marginBottom: 24,
+    lineHeight: 24,
+    paddingHorizontal: 16,
+    fontFamily: 'Outfit_400Regular',
   },
   statsBar: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: theme.colors.border,
-    marginBottom: theme.spacing.lg,
+    borderColor: '#27272A',
+    marginBottom: 24,
   },
   statItem: {
-    flexDirection: 'row',
+    flex: 1,
     alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    marginHorizontal: 4,
   },
   statText: {
-    marginLeft: theme.spacing.xs,
-    color: theme.colors.textSecondary,
-    fontSize: 13,
+    marginLeft: 4,
+    color: '#71717A',
+    fontSize: 12,
     fontWeight: '500',
+    fontFamily: 'Outfit_400Regular',
   },
   startButton: {
-    backgroundColor: theme.colors.primary, // Gold/Yellow
-    borderRadius: theme.borderRadius.lg, // More rounded
-    paddingVertical: theme.spacing.lg-2, // Slightly taller
-    marginHorizontal: theme.spacing.md, // Margin for the button itself
-    flexDirection: 'row',
+    backgroundColor: theme.colors.primary,
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 24,
+    gap: 8,
   },
   startButtonText: {
-    color: theme.colors.primaryForeground, // Dark text on light primary
-    fontWeight: 'bold',
-    fontSize: 18,
-    marginLeft: theme.spacing.sm,
+    color: '#000',
+    fontWeight: '400',
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
   },
   infoCard: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    backgroundColor: '#000',
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    paddingBottom: theme.spacing.sm,
-    marginBottom: theme.spacing.md,
+    borderBottomColor: '#27272A',
+    paddingBottom: 12,
+    marginBottom: 16,
   },
   cardTitle: {
-    color: theme.colors.text,
+    color: '#fff',
     fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: theme.spacing.sm,
+    fontWeight: '400',
+    marginLeft: 8,
+    fontFamily: 'Outfit_400Regular',
   },
   creatorInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   creatorAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: theme.spacing.md,
-    backgroundColor: theme.colors.border,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
   },
   creatorAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: theme.spacing.md,
-    backgroundColor: theme.colors.background, // Darker placeholder
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: '#27272A',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
   },
   creatorName: {
-    color: theme.colors.text,
+    color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '400',
+    fontFamily: 'Outfit_400Regular',
   },
   creatorSubtext: {
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     fontSize: 13,
+    fontFamily: 'Outfit_400Regular',
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: '#27272A',
   },
   detailLabel: {
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     fontSize: 14,
     fontWeight: '500',
+    fontFamily: 'Outfit_400Regular',
   },
   detailValue: {
-    color: theme.colors.text,
+    color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
-  },
-  // Placeholder for future tabs
-  tabSectionPlaceholder: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    color: theme.colors.textSecondary,
-    fontSize: 16,
+    fontWeight: '400',
+    fontFamily: 'Outfit_400Regular',
   },
   commentsBox: {
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
+    padding: 16,
+    marginBottom: 16,
+    backgroundColor: '#000',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272A',
   },
   commentsTitle: {
-    color: theme.colors.text,
     fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: theme.spacing.md,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 16,
+    fontFamily: 'Outfit_400Regular',
   },
-  noComments: {
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.md,
+  commentsList: {
+    marginBottom: 16,
   },
-  commentItem: {
+  commentContainer: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272A',
+  },
+  commentHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.md,
+    marginBottom: 8,
   },
-  commentUser: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: 'bold',
+  commentUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  commentAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  commentAvatarFallback: {
+    backgroundColor: '#27272A',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentAvatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: 'Outfit_400Regular',
+  },
+  commentUsername: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 4,
+    fontFamily: 'Outfit_400Regular',
+  },
+  commentDate: {
+    fontSize: 12,
+    color: '#71717A',
+    fontFamily: 'Outfit_400Regular',
   },
   commentText: {
-    color: theme.colors.textSecondary,
     fontSize: 14,
+    color: '#fff',
+    marginBottom: 4,
+    fontFamily: 'Outfit_400Regular',
+    lineHeight: 20,
   },
   addCommentBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: theme.spacing.md,
+    alignItems: 'flex-end',
+    padding: 16,
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
+    borderTopColor: '#27272A',
+    gap: 8,
   },
   commentInput: {
     flex: 1,
-    padding: theme.spacing.md,
-    color: theme.colors.text,
+    backgroundColor: '#000',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#fff',
+    marginRight: 8,
+    fontSize: 14,
+    fontFamily: 'Outfit_400Regular',
+    minHeight: 40,
   },
   addCommentButton: {
     backgroundColor: theme.colors.primary,
-    padding: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    marginLeft: theme.spacing.md,
+    borderRadius: 8,
+    padding: 8,
+  },
+  addCommentButtonDisabled: {
+    opacity: 0.7,
   },
   addCommentButtonText: {
-    color: theme.colors.primaryForeground,
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: 'Outfit_400Regular',
+  },
+  noComments: {
+    color: '#71717A',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontStyle: 'italic',
+    fontFamily: 'Outfit_400Regular',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272A',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 8,
+    fontFamily: 'Outfit_400Regular',
+  },
+  similarTestsContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  similarTestCardWrapper: {
+    marginRight: 16,
+  },
+  similarTestCard: {
+    width: '100%',
+  },
+  similarTestImage: {
+    height: 160,
+    width: '100%',
+  },
+  similarTestImageStyle: {
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  similarTestOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  similarTestInfo: {
+    padding: 16,
+  },
+  similarTestTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 12,
+    fontFamily: 'Outfit_400Regular',
+  },
+  similarTestStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  similarTestStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  similarTestStatText: {
+    fontSize: 13,
+    color: '#71717A',
+    fontFamily: 'Outfit_400Regular',
   },
 });
 

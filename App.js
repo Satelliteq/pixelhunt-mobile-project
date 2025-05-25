@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 // import { Feather } from '@expo/vector-icons'; // Feather is used within TabBar, not directly here
 // import { Animated } from 'react-native'; // Removed Animated import
 // import { theme } from './theme'; // Removed theme import
@@ -16,8 +16,11 @@ import ProfileScreen from './screens/ProfileScreen';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import TestDetailScreen from './screens/TestDetailScreen';
 import GameScreen from './screens/GameScreen';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { onAuthUserChanged } from './config/firebase';
+import SearchScreen from './screens/SearchScreen';
+import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { onAuthUserChanged, auth } from './config/firebase';
+import { useFonts, Outfit_400Regular, Outfit_700Bold } from '@expo-google-fonts/outfit';
+import { AuthProvider } from './contexts/AuthContext';
 
 // ----- Placeholder Screen -----
 // Replace this with your actual screen component for the 'layers' tab
@@ -28,13 +31,20 @@ const PlaceholderLayersScreen = () => (
 );
 const styles = StyleSheet.create({
     placeholderContainer: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000'},
-    placeholderText:{color:'#fff', fontSize: 18},
+    placeholderText:{color:'#fff', fontSize: 18, fontFamily: 'Outfit_700Bold'},
     loaderContainer: {flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#000'},
+    errorText: {
+        color: '#ff4444',
+        fontSize: 16,
+        textAlign: 'center',
+        margin: 20,
+        fontFamily: 'Outfit_400Regular'
+    }
 });
 // ----- End Placeholder Screen -----
 
 const Tab = createBottomTabNavigator();
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 // Removed the Animated TabBarIcon component
 
@@ -56,16 +66,52 @@ const MainTabs = () => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [fontsLoaded] = useFonts({
+    Outfit_400Regular,
+    Outfit_700Bold,
+  });
 
   useEffect(() => {
-    const unsubscribe = onAuthUserChanged((firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-    });
-    return unsubscribe;
+    let unsubscribe;
+    
+    const initializeAuth = async () => {
+      try {
+        if (!auth) {
+          throw new Error('Firebase Auth instance bulunamadı');
+        }
+        
+        unsubscribe = onAuthUserChanged((firebaseUser) => {
+          setUser(firebaseUser);
+          setLoading(false);
+        }, (error) => {
+          setError(error);
+          setLoading(false);
+        });
+      } catch (error) {
+        setError(error);
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
-  if (loading) {
+  if (error) {
+    return (
+      <View style={styles.loaderContainer}>
+        <Text style={styles.errorText}>Bir hata oluştu: {error.message}</Text>
+      </View>
+    );
+  }
+
+  if (!fontsLoaded || loading) {
     return (
       <View style={styles.loaderContainer}>
         <ActivityIndicator size="large" color="#fff" />
@@ -74,32 +120,35 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false, // Globally hide headers for the stack navigator
-        }}
-      >
-        {/* Authentication Screens */}
-        {user ? (
-          <>
-            <Stack.Screen name="Main" component={MainTabs} />
-            <Stack.Screen name="TestDetail" component={TestDetailScreen} />
-            <Stack.Screen name="Game" component={GameScreen} />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Signup" component={SignupScreen} />
-            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-          </>
-        )}
+    <AuthProvider>
+      <NavigationContainer>
+        <Stack.Navigator
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          {/* Authentication Screens */}
+          {user ? (
+            <>
+              <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="TestDetail" component={TestDetailScreen} />
+              <Stack.Screen name="Game" component={GameScreen} />
+              <Stack.Screen name="Search" component={SearchScreen} />
+            </>
+          ) : (
+            <>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Signup" component={SignupScreen} />
+              <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+            </>
+          )}
 
-        {/* Main App Screens (grouped under MainTabs) */}
-        {/* Example: <Stack.Screen name="TestDetail" component={TestDetailScreen} /> */}
-        {/* Example: <Stack.Screen name="Settings" component={SettingsScreen} /> */}
+          {/* Main App Screens (grouped under MainTabs) */}
+          {/* Example: <Stack.Screen name="TestDetail" component={TestDetailScreen} /> */}
+          {/* Example: <Stack.Screen name="Settings" component={SettingsScreen} /> */}
 
-      </Stack.Navigator>
-    </NavigationContainer>
+        </Stack.Navigator>
+      </NavigationContainer>
+    </AuthProvider>
   );
 }

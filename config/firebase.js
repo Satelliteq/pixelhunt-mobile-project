@@ -45,7 +45,7 @@ import { Alert } from 'react-native';
 // WebBrowser.maybeCompleteAuthSession(); // Google ile Expo Auth Session kullanılmıyorsa kaldırılabilir
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAPw9V2lEzy9nBvie2PBgbYthWWa0d3k7Y",
+  apiKey: "AIzaSyBtHxrkA9kcUQZyJp9bA48Evyt5U-7AVoQ",
   authDomain: "pixelhunt-7afa8.firebaseapp.com",
   projectId: "pixelhunt-7afa8",
   storageBucket: "pixelhunt-7afa8.appspot.com",
@@ -56,33 +56,47 @@ const firebaseConfig = {
 
 // Firebase App başlatma
 let app;
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApp();
-}
-
-// Firebase Auth başlatma
-let auth;
 try {
-  auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
-  });
-} catch (error) {
-  if (error.code === 'auth/already-initialized') {
-    auth = getAuth(app);
+  if (getApps().length === 0) {
+    app = initializeApp(firebaseConfig);
   } else {
-    console.error("Firebase auth başlatma hatası:", error);
-    throw error;
+    app = getApp();
   }
+} catch (error) {
+  throw error;
 }
 
+// Firebase Auth başlatma (Expo Go ile uyumlu)
+const auth = getAuth(app);
+
+// Auth instance'ını dışa aktar
+export { auth };
+
+// Firestore başlatma ve ayarları
 const db = getFirestore(app);
 const storage = getStorage(app);
 
+// Firestore ayarlarını güncelle
+const firestoreSettings = {
+  cacheSizeBytes: 50 * 1024 * 1024, // 50MB cache
+  experimentalForceLongPolling: true, // Daha güvenilir bağlantı için
+  merge: true,
+  ignoreUndefinedProperties: true
+};
+
+// Bağlantı durumunu kontrol et
+const checkConnection = async () => {
+  try {
+    const testQuery = query(collection(db, 'tests'), limit(1));
+    await getDocs(testQuery);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
 export const signInWithFirebaseUsingGoogleToken = async (idToken) => {
   if (!idToken) {
-    console.error("signInWithFirebaseUsingGoogleToken: idToken is missing.");
     throw new Error("Google'dan ID token alınamadı.");
   }
   try {
@@ -112,25 +126,59 @@ export const signInWithFirebaseUsingGoogleToken = async (idToken) => {
     }
     return user;
   } catch (error) {
-    console.error("Firebase Google ile giriş hatası:", error.code, error.message);
     throw error;
   }
 };
 
 export const onAuthUserChanged = (callback) => {
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, (user) => {
+    callback(user);
+  });
 };
 
 export const signInWithEmail = async (email, password) => {
   try {
+    if (!auth) {
+      throw new Error('Authentication servisi başlatılamadı');
+    }
+    
+    if (!email || !password) {
+      throw new Error('E-posta ve şifre gereklidir');
+    }
+    
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    
     const userRef = doc(db, 'users', userCredential.user.uid);
-    await updateDoc(userRef, { lastLogin: serverTimestamp() })
-      .catch(err => console.warn("E-posta kullanıcısı için lastLogin güncellenemedi:", err));
+    await updateDoc(userRef, { 
+      lastLogin: serverTimestamp(),
+      email: userCredential.user.email,
+      displayName: userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'Kullanıcı'
+    }).catch(err => {
+      console.warn("Kullanıcı bilgileri güncellenirken hata:", err);
+    });
+    
     return userCredential.user;
   } catch (error) {
-    console.error("E-posta ile giriş hatası:", error.code, error.message);
-    throw error;
+    let errorMessage = 'Giriş yapılırken bir hata oluştu';
+    switch (error.code) {
+      case 'auth/invalid-credential':
+        errorMessage = 'E-posta veya şifre hatalı';
+        break;
+      case 'auth/user-not-found':
+        errorMessage = 'Bu e-posta adresi ile kayıtlı kullanıcı bulunamadı';
+        break;
+      case 'auth/wrong-password':
+        errorMessage = 'Hatalı şifre';
+        break;
+      case 'auth/too-many-requests':
+        errorMessage = 'Çok fazla başarısız deneme. Lütfen daha sonra tekrar deneyin';
+        break;
+      case 'auth/network-request-failed':
+        errorMessage = 'İnternet bağlantınızı kontrol edin';
+        break;
+    }
+    
+    throw new Error(errorMessage);
   }
 };
 
@@ -151,7 +199,6 @@ export const signUpWithEmail = async (email, password, name) => {
     });
     return userCredential.user;
   } catch (error) {
-    console.error("E-posta ile kayıt hatası:", error.code, error.message);
     throw error;
   }
 };
@@ -160,7 +207,6 @@ export const signOut = async () => {
   try {
     await firebaseSignOut(auth);
   } catch (error) {
-    console.error("Çıkış yapma hatası:", error.code, error.message);
     throw error;
   }
 };
@@ -169,7 +215,6 @@ export const resetPassword = async (email) => {
   try {
     await sendPasswordResetEmail(auth, email);
   } catch (error) {
-    console.error("Şifre sıfırlama hatası:", error.code, error.message);
     throw error;
   }
 };
@@ -187,19 +232,25 @@ export const fetchTests = async ({
   searchQuery = null
 }) => {
   try {
+    // Bağlantı kontrolü
+    const isConnected = await checkConnection();
+    if (!isConnected) {
+      throw new Error('İnternet bağlantısı yok veya Firestore\'a erişilemiyor');
+    }
+    
     let q = collection(db, 'tests');
     let constraints = [];
 
-    if (featured) constraints.push(where('featured', '==', true));
+    // Temel filtreler
     if (isPublic) constraints.push(where('isPublic', '==', true));
     if (approved) constraints.push(where('approved', '==', true));
+    
+    // Özel filtreler
+    if (featured) constraints.push(where('featured', '==', true));
     if (categoryId) constraints.push(where('categoryId', '==', categoryId));
-    if (userId) constraints.push(where('userId', '==', userId));
-    if (searchQuery) {
-      constraints.push(where('title', '>=', searchQuery));
-      constraints.push(where('title', '<=', searchQuery + '\uf8ff'));
-    }
+    if (userId) constraints.push(where('creatorId', '==', userId));
 
+    // Sıralama ve limit
     constraints.push(orderBy(orderByField, orderDirection));
     constraints.push(limit(testLimit));
 
@@ -208,12 +259,91 @@ export const fetchTests = async ({
     }
 
     q = query(q, ...constraints);
+
     const querySnapshot = await getDocs(q);
-    
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+
+    // Test verilerini işle ve görselleri yükle
+    const processedTests = await Promise.all(
+      querySnapshot.docs.map(async (doc) => {
+        const data = doc.data();
+        const test = {
+          id: doc.id,
+          uuid: data.uuid || doc.id,
+          title: data.title,
+          description: data.description || '',
+          creatorId: data.creatorId || '',
+          creatorName: data.creatorName || '',
+          categoryId: data.categoryId || '',
+          categoryName: data.categoryName || '',
+          questions: data.questions || [],
+          playCount: data.playCount || 0,
+          likeCount: data.likeCount || 0,
+          commentCount: data.commentCount || 0,
+          featured: data.featured || false,
+          difficulty: data.difficulty || 'normal',
+          isPublic: data.isPublic !== false,
+          approved: data.approved === true,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+          thumbnail: data.thumbnail,
+          imageUrls: data.imageUrls || []
+        };
+
+        // Görsel URL'lerini al
+        try {
+          // Thumbnail URL'sini al
+          if (data.thumbnailUrl) {
+            test.thumbnailUrl = await getTestImageUrl(data.thumbnailUrl);
+          } else if (data.thumbnail) {
+            test.thumbnailUrl = await getTestImageUrl(data.thumbnail);
+          } else if (data.image_urls && data.image_urls.length > 0) {
+            test.thumbnailUrl = await getTestImageUrl(data.image_urls[0]);
+          } else if (data.questions && data.questions.length > 0 && data.questions[0].imageUrl) {
+            test.thumbnailUrl = await getTestImageUrl(data.questions[0].imageUrl);
+          } else {
+            test.thumbnailUrl = getDefaultThumbnail();
+          }
+
+          // Tüm görsel URL'lerini al
+          const allImageUrls = new Set();
+
+          // Test görsellerini ekle
+          if (data.image_urls && Array.isArray(data.image_urls)) {
+            data.image_urls.forEach(url => allImageUrls.add(url));
+          }
+
+          // Soru görsellerini ekle
+          if (data.questions && Array.isArray(data.questions)) {
+            data.questions.forEach(question => {
+              if (question.imageUrl) {
+                allImageUrls.add(question.imageUrl);
+              }
+            });
+          }
+
+          // Tüm görselleri işle
+          const imagePromises = Array.from(allImageUrls).map(url => getTestImageUrl(url));
+          test.imageUrls = await Promise.all(imagePromises);
+
+        } catch (error) {
+          test.thumbnailUrl = getDefaultThumbnail();
+          test.imageUrls = [];
+        }
+
+        return test;
+      })
+    );
+
+    // Arama varsa client-side filter
+    if (searchQuery && searchQuery.trim() !== '') {
+      const normalizedQuery = searchQuery.toLowerCase().trim();
+      return processedTests.filter(test =>
+        test.title?.toLowerCase().includes(normalizedQuery) ||
+        test.description?.toLowerCase().includes(normalizedQuery)
+      );
+    }
+
+    return processedTests;
   } catch (error) {
     throw error;
   }
@@ -224,48 +354,28 @@ export const fetchCategories = async () => {
     const q = query(
       collection(db, 'categories'),
       where('active', '==', true),
-      orderBy('order', 'asc')
+      orderBy('name')
     );
     const querySnapshot = await getDocs(q);
-    
-    if (querySnapshot.empty) {
-      Alert.alert(
-        'Kategori Yok',
-        'Hiç kategori bulunamadı. Lütfen daha sonra tekrar deneyin.'
-      );
-      return [];
-    }
 
     const categories = querySnapshot.docs.map(doc => {
       const data = doc.data();
-      if (!data.name || typeof data.name !== 'string') {
-        console.warn(`Kategori dokümanında isim eksik veya hatalı: ${doc.id}`);
-      }
-      if (typeof data.order !== 'number') {
-        console.warn(`Kategori dokümanında order eksik veya hatalı: ${doc.id}`);
-      }
       return {
         id: doc.id,
-        name: data.name || 'İsimsiz Kategori',
+        name: data.name,
         description: data.description || '',
-        iconName: data.iconName || 'folder',
-        color: data.color || '#6366F1',
-        backgroundColor: data.backgroundColor || '#EEF2FF',
+        iconName: data.iconName,
+        color: data.color,
+        backgroundColor: data.backgroundColor,
         active: data.active !== false,
-        order: typeof data.order === 'number' ? data.order : 0,
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
         updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date()
       };
     });
 
-    return categories.sort((a, b) => (a.order || 0) - (b.order || 0));
+    return categories;
   } catch (error) {
-    console.error('Kategoriler çekilirken hata:', error);
-    Alert.alert(
-      'Hata',
-      'Kategoriler yüklenirken bir hata oluştu. Lütfen tekrar deneyin.'
-    );
-    return [];
+    throw error;
   }
 };
 
@@ -281,48 +391,38 @@ export const fetchTestById = async (testId) => {
     const testData = { id: testSnap.id, ...testSnap.data() };
     const processedTest = await processTestData(testData);
 
-    console.log(`Test başarıyla yüklendi (ID: ${testId})`);
     return processedTest;
   } catch (error) {
-    console.error(`Test yüklenirken hata (ID: ${testId}):`, error);
     throw error;
   }
 };
 
 export const fetchUserDocument = async (userId) => {
   if (!userId) {
-    console.warn("fetchUserDocument: userId tanımsız.");
     return null;
   }
-  console.log(`fetchUserDocument çağrıldı: ${userId}`);
   try {
     const userRef = doc(db, 'users', userId);
     const docSnap = await getDoc(userRef);
     if (docSnap.exists()) {
-      console.log(`Kullanıcı dokümanı bulundu: ${userId}`);
       return { id: docSnap.id, ...docSnap.data() };
     } else {
-      console.warn(`Kullanıcı ID'si ${userId} olan doküman bulunamadı.`);
       return null;
     }
   } catch (error) {
-    console.error(`Kullanıcı (${userId}) dokümanını çekerken hata:`, error);
     throw error;
   }
 };
 
 export const fetchUserStats = async (userId) => {
   if (!userId) {
-    console.warn("fetchUserStats: userId tanımsız.");
     return { total_tests_created: 0, total_score_achieved: 0, total_tests_played: 0, rank: 'N/A' };
   }
-  console.log(`fetchUserStats çağrıldı: ${userId}`);
   try {
     const statsRef = doc(db, 'user_stats', userId);
     const docSnap = await getDoc(statsRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      console.log(`Kullanıcı istatistikleri bulundu: ${userId}`);
       return {
         id: docSnap.id,
         total_tests_created: data.total_tests_created || 0,
@@ -331,11 +431,9 @@ export const fetchUserStats = async (userId) => {
         rank: data.rank || 'N/A',
       };
     } else {
-      console.warn(`Kullanıcı ID'si ${userId} için istatistik dokümanı bulunamadı.`);
       return { total_tests_created: 0, total_score_achieved: 0, total_tests_played: 0, rank: 'N/A' };
     }
   } catch (error) {
-    console.error(`Kullanıcı (${userId}) istatistiklerini çekerken hata:`, error);
     throw error;
   }
 };
@@ -387,10 +485,8 @@ export const fetchTestsByIds = async (testIds) => {
 export const createTestInFirestore = async (testDataFromUI) => {
   const currentUser = auth.currentUser;
   if (!currentUser) {
-    console.error("createTestInFirestore: Kullanıcı giriş yapmamış.");
     throw new Error("Test oluşturmak için giriş yapmalısınız.");
   }
-  console.log(`createTestInFirestore çağrıldı, kullanıcı: ${currentUser.uid}`);
   try {
     const testsCollectionRef = collection(db, 'tests');
     const newTestData = {
@@ -415,21 +511,17 @@ export const createTestInFirestore = async (testDataFromUI) => {
     };
 
     if (!newTestData.title || !newTestData.description || !newTestData.category_id || newTestData.image_urls.length === 0) {
-        console.error("Test oluşturma hatası: Zorunlu alanlar eksik.", newTestData);
         throw new Error("Lütfen tüm zorunlu alanları (başlık, açıklama, kategori, en az bir görsel) doldurun.");
     }
 
     const docRef = await addDoc(testsCollectionRef, newTestData);
-    console.log(`Yeni test Firestore'a eklendi, ID: ${docRef.id}`);
     return { id: docRef.id, ...newTestData, created_at: new Date() /* Geçici timestamp */ };
   } catch (error) {
-    console.error('Testi Firestore\'da oluştururken hata:', error.message, error.stack);
     throw error;
   }
 };
 
 export const uploadImageAndGetURL = async (uri, path, onProgress) => {
-  console.log(`uploadImageAndGetURL çağrıldı, path: ${path}`);
   try {
     const response = await fetch(uri);
     const blob = await response.blob();
@@ -441,29 +533,24 @@ export const uploadImageAndGetURL = async (uri, path, onProgress) => {
         'state_changed',
         (snapshot) => {
           const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          console.log('Yükleme ilerlemesi: ' + progress + '%');
           if (onProgress) {
             onProgress(progress);
           }
         },
         (error) => {
-          console.error('Storage yükleme hatası (uploadTask.on error):', error.code, error.message);
           reject(error);
         },
         async () => {
           try {
             const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            console.log('Dosya yüklendi, URL:', downloadURL);
             resolve(downloadURL);
           } catch (e) {
-            console.error('Download URL alma hatası:', e.code, e.message);
             reject(e);
           }
         }
       );
     });
   } catch (error) {
-    console.error('Görsel yükleme ön hazırlık hatası (fetch/blob):', error.message);
     throw error;
   }
 };
@@ -471,15 +558,34 @@ export const uploadImageAndGetURL = async (uri, path, onProgress) => {
 // Test resmi URL'sini getir
 export const getTestImageUrl = async (imagePath) => {
   try {
-    if (!imagePath) return null;
-    
+    if (!imagePath) {
+      return getDefaultThumbnail();
+    }
+
+    // Eğer zaten bir URL ise direkt döndür
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return imagePath;
+    }
+
+    // Firebase Storage'dan görsel al
     const imageRef = ref(storage, imagePath);
     const url = await getDownloadURL(imageRef);
     return url;
   } catch (error) {
-    console.error('Test resmi getirme hatası:', error);
-    return null;
+    return getDefaultThumbnail();
   }
+};
+
+// Varsayılan görsel URL'lerini döndüren yardımcı fonksiyon
+const getDefaultThumbnail = () => {
+  const defaultThumbnails = [
+    'https://firebasestorage.googleapis.com/v0/b/pixelhunt-7afa8.appspot.com/o/defaults%2Fdefault1.jpg?alt=media',
+    'https://firebasestorage.googleapis.com/v0/b/pixelhunt-7afa8.appspot.com/o/defaults%2Fdefault2.jpg?alt=media',
+    'https://firebasestorage.googleapis.com/v0/b/pixelhunt-7afa8.appspot.com/o/defaults%2Fdefault3.jpg?alt=media',
+    'https://firebasestorage.googleapis.com/v0/b/pixelhunt-7afa8.appspot.com/o/defaults%2Fdefault4.jpg?alt=media',
+    'https://firebasestorage.googleapis.com/v0/b/pixelhunt-7afa8.appspot.com/o/defaults%2Fdefault5.jpg?alt=media'
+  ];
+  return defaultThumbnails[Math.floor(Math.random() * defaultThumbnails.length)];
 };
 
 // Test verilerini işle ve resim URL'lerini ekle
@@ -503,31 +609,53 @@ export const processTestData = async (test) => {
       difficulty: test.difficulty || 'normal',
       createdAt: test.createdAt || test.created_at || null,
       updatedAt: test.updatedAt || test.updated_at || null,
-      thumbnailUrl: null
+      thumbnailUrl: null,
+      imageUrls: []
     };
 
-    // Görsel URL'sini al
-    if (test.thumbnail) {
-      try {
+    // Görsel URL'lerini al
+    try {
+      // Thumbnail URL'sini al
+      if (test.thumbnailUrl) {
+        processedTest.thumbnailUrl = await getTestImageUrl(test.thumbnailUrl);
+      } else if (test.thumbnail) {
         processedTest.thumbnailUrl = await getTestImageUrl(test.thumbnail);
-      } catch (error) {
-        console.warn('Test görseli yüklenemedi:', error);
-        processedTest.thumbnailUrl = 'https://via.placeholder.com/400x300?text=Test+Görseli';
-      }
-    } else if (test.image_urls && test.image_urls.length > 0) {
-      try {
+      } else if (test.image_urls && test.image_urls.length > 0) {
         processedTest.thumbnailUrl = await getTestImageUrl(test.image_urls[0]);
-      } catch (error) {
-        console.warn('Test görseli yüklenemedi:', error);
-        processedTest.thumbnailUrl = 'https://via.placeholder.com/400x300?text=Test+Görseli';
+      } else if (test.questions && test.questions.length > 0 && test.questions[0].imageUrl) {
+        processedTest.thumbnailUrl = await getTestImageUrl(test.questions[0].imageUrl);
+      } else {
+        processedTest.thumbnailUrl = getDefaultThumbnail();
       }
-    } else {
-      processedTest.thumbnailUrl = 'https://via.placeholder.com/400x300?text=Test+Görseli';
+
+      // Tüm görsel URL'lerini al
+      const allImageUrls = new Set();
+
+      // Test görsellerini ekle
+      if (test.image_urls && Array.isArray(test.image_urls)) {
+        test.image_urls.forEach(url => allImageUrls.add(url));
+      }
+
+      // Soru görsellerini ekle
+      if (test.questions && Array.isArray(test.questions)) {
+        test.questions.forEach(question => {
+          if (question.imageUrl) {
+            allImageUrls.add(question.imageUrl);
+          }
+        });
+      }
+
+      // Tüm görselleri işle
+      const imagePromises = Array.from(allImageUrls).map(url => getTestImageUrl(url));
+      processedTest.imageUrls = await Promise.all(imagePromises);
+
+    } catch (error) {
+      processedTest.thumbnailUrl = getDefaultThumbnail();
+      processedTest.imageUrls = [];
     }
 
     return processedTest;
   } catch (error) {
-    console.error('Test verisi işlenirken hata:', error);
     return null;
   }
 };
@@ -543,4 +671,42 @@ export const incrementPlayCount = async (testId) => {
   }
 };
 
-export { app, auth, db, storage };
+// Herkese açık testleri getir (kullanıcıya özel değil)
+export const fetchAllTests = async () => {
+  try {
+    const q = query(
+      collection(db, 'tests'),
+      where('isPublic', '==', true),
+      where('approved', '==', true),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    return [];
+  }
+};
+
+// Herkese açık kategorileri getir (kullanıcıya özel değil)
+export const fetchAllCategories = async () => {
+  try {
+    const q = query(
+      collection(db, 'categories'),
+      where('active', '==', true),
+      orderBy('name')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    return [];
+  }
+};
+
+export { app, db, storage };

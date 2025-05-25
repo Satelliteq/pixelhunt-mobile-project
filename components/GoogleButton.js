@@ -2,8 +2,9 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, View, ActivityIndicator } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { Feather } from '@expo/vector-icons';
 
-export default function GoogleButton({ onPress, disabled, loading, text = "Google ile Giriş Yap" }) {
+export default function GoogleButton({ onPress, disabled, loading, text = "Google ile Giriş Yap", textStyle }) {
   return (
     <TouchableOpacity
       style={[
@@ -11,15 +12,15 @@ export default function GoogleButton({ onPress, disabled, loading, text = "Googl
         disabled && styles.googleButtonDisabled,
       ]}
       onPress={onPress}
-      disabled={disabled}
+      disabled={disabled || loading}
       activeOpacity={0.85}
     >
       <View style={styles.innerRow}>
-        <FontAwesome name="google" size={24} color={theme.colors.text} style={styles.googleIcon} />
+        <FontAwesome name="google" size={24} color="#000" style={styles.googleIcon} />
         {loading ? (
-          <ActivityIndicator size="small" color={theme.colors.text} style={{ marginLeft: 8 }} />
+          <ActivityIndicator size="small" color="#000" style={{ marginLeft: 8 }} />
         ) : (
-          <Text style={styles.googleButtonText}>{text}</Text>
+          <Text style={[styles.googleButtonText, textStyle]}>{text}</Text>
         )}
       </View>
     </TouchableOpacity>
@@ -31,18 +32,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.card,
-    borderColor: theme.colors.border,
+    backgroundColor: '#fff',
+    borderColor: '#27272A',
     borderWidth: 1,
-    borderRadius: theme.borderRadius.lg,
-    paddingVertical: theme.spacing.md,
-    marginBottom: theme.spacing.md,
+    borderRadius: 8,
+    paddingVertical: 16,
+    marginBottom: 16,
     width: '100%',
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 2,
-    elevation: 1,
   },
   googleButtonDisabled: {
     opacity: 0.6,
@@ -53,11 +49,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   googleIcon: {
-    marginRight: theme.spacing.md,
+    marginRight: 12,
   },
   googleButtonText: {
-    color: theme.colors.text,
+    color: '#000',
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Outfit_700Bold',
   },
 }); 

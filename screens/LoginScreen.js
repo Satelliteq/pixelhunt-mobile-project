@@ -49,10 +49,9 @@ export default function LoginScreen() {
   });
 
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
     androidClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
     iosClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
-    webClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
+    expoClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com'
   });
 
   useEffect(() => {
@@ -66,7 +65,6 @@ export default function LoginScreen() {
             errorMessage = 'Bu e-posta adresi başka bir giriş yöntemiyle zaten kayıtlı.';
           }
           Alert.alert('Google Giriş Hatası', errorMessage);
-          console.error('Google Sign-In error:', error);
         })
         .finally(() => setGoogleSubmitting(false));
     }
@@ -75,7 +73,7 @@ export default function LoginScreen() {
   const onLogin = async (data) => {
     setIsSubmitting(true);
     try {
-      await signInWithEmail(data.email, data.password);
+      const user = await signInWithEmail(data.email, data.password);
       reset(); // Formu temizle
     } catch (error) {
       let errorMessage = 'Giriş yapılırken bir hata oluştu. Lütfen bilgilerinizi kontrol edin.';
@@ -87,9 +85,11 @@ export default function LoginScreen() {
         errorMessage = 'Geçersiz e-posta adresi formatı.';
       } else if (error.code === 'auth/too-many-requests') {
         errorMessage = 'Çok fazla hatalı giriş denemesi. Lütfen daha sonra tekrar deneyin.';
+      } else if (error.code === 'auth/network-request-failed') {
+        errorMessage = 'İnternet bağlantınızı kontrol edin.';
       }
+      
       Alert.alert('Giriş Başarısız', errorMessage);
-      console.error("Login error:", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -100,7 +100,6 @@ export default function LoginScreen() {
       setGoogleSubmitting(true);
       await promptAsync();
     } catch (error) {
-      console.error('Google giriş hatası:', error);
       Alert.alert('Google Giriş Hatası', 'Google ile giriş yapılırken bir hata oluştu.');
     } finally {
       setGoogleSubmitting(false);
@@ -109,13 +108,15 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.container}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContentContainer}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bounces={false}
       >
         <View style={styles.content}>
           <Image
@@ -134,6 +135,7 @@ export default function LoginScreen() {
             disabled={!request || isSubmitting || googleSubmitting}
             loading={googleSubmitting}
             text="Google ile Giriş Yap"
+            textStyle={styles.googleButtonText}
           />
 
           <View style={styles.dividerContainer}>
@@ -153,7 +155,7 @@ export default function LoginScreen() {
                     <TextInput
                       style={styles.input}
                       placeholder="E-posta Adresiniz"
-                      placeholderTextColor={theme.colors.textPlaceholder || '#888'}
+                      placeholderTextColor="#71717A"
                       value={value}
                       onChangeText={onChange}
                       onBlur={onBlur}
@@ -178,7 +180,7 @@ export default function LoginScreen() {
                     <TextInput
                       style={styles.input}
                       placeholder="Şifreniz"
-                      placeholderTextColor={theme.colors.textPlaceholder || '#888'}
+                      placeholderTextColor="#71717A"
                       value={value}
                       onChangeText={onChange}
                       onBlur={onBlur}
@@ -238,152 +240,142 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
   },
   scrollContentContainer: {
     flexGrow: 1,
-    justifyContent: 'center', // İçeriği dikeyde ortala
+    backgroundColor: '#000',
+    minHeight: '100%',
   },
   content: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.xl, // Üst ve altta daha fazla boşluk
-    alignItems: 'center',
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: '#000',
+    minHeight: '100%',
   },
   logo: {
     height: 80,
-    marginBottom: theme.spacing.xl,
+    marginBottom: 24,
+    alignSelf: 'center',
   },
   title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.sm,
+    fontSize: 24,
+    color: '#fff',
+    marginBottom: 8,
     textAlign: 'center',
+    fontFamily: 'Outfit_700Bold',
   },
   subtitle: {
     fontSize: 16,
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     textAlign: 'center',
-    marginBottom: theme.spacing.lg, // Sosyal buton öncesi boşluk
-    paddingHorizontal: theme.spacing.md, // Uzunsa taşmasın
-  },
-  socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.lg, // Daha yuvarlak
-    width: '100%',
-    marginBottom: theme.spacing.md,
-    borderWidth: 1,
-  },
-  googleButton: {
-    backgroundColor: theme.colors.white, // Google için beyaz arkaplan
-    borderColor: theme.colors.border, // Hafif bir sınır
-  },
-  socialIcon: {
-    width: 24,
-    height: 24,
-    marginRight: theme.spacing.md,
-  },
-  googleButtonText: {
-    color: theme.colors.black, // Google için siyah metin
-    fontSize: 16,
-    fontWeight: '600',
+    marginBottom: 24,
+    fontFamily: 'Outfit_400Regular',
   },
   dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '90%', // Biraz daha dar
-    marginVertical: theme.spacing.lg, // "VEYA" için daha fazla boşluk
+    marginVertical: 24,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: theme.colors.border,
+    backgroundColor: '#27272A',
   },
   dividerText: {
-    color: theme.colors.textSecondary,
-    paddingHorizontal: theme.spacing.md,
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#71717A',
+    paddingHorizontal: 16,
+    fontSize: 14,
+    fontFamily: 'Outfit_400Regular',
   },
   formContainer: {
     width: '100%',
   },
   inputOuterContainer: {
-    marginBottom: theme.spacing.xs, // Hata mesajı için altta az boşluk
+    marginBottom: 16,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.inputBackground || theme.colors.card,
-    borderRadius: theme.borderRadius.md,
-    paddingHorizontal: theme.spacing.md,
+    backgroundColor: '#000',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: theme.colors.border, // Varsayılan border
-    height: 50, // Sabit yükseklik
-    marginBottom: theme.spacing.sm, // Inputlar arası boşluk
+    borderColor: '#27272A',
+    height: 50,
   },
   inputErrorBorder: {
-    borderColor: theme.colors.error, // Hata durumunda border rengi
+    borderColor: '#ef4444',
   },
   inputIcon: {
-    marginRight: theme.spacing.sm,
+    marginRight: 12,
   },
   input: {
     flex: 1,
-    color: theme.colors.inputText || theme.colors.text,
-    fontSize: 15,
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
+    height: '100%',
+    paddingVertical: 0,
+    paddingRight: 40,
   },
   passwordToggle: {
-    padding: theme.spacing.sm, // Tıklama alanını artır
+    position: 'absolute',
+    right: 12,
+    padding: 8,
   },
   errorText: {
-    color: theme.colors.error,
-    fontSize: 13,
-    paddingLeft: theme.spacing.xs, // Hafif içe al
-    marginBottom: theme.spacing.sm, // Altındaki elemandan önce boşluk
+    color: '#ef4444',
+    fontSize: 14,
+    marginTop: 4,
+    fontFamily: 'Outfit_400Regular',
   },
   forgotPasswordButton: {
-    alignSelf: 'flex-end', // Sağa yasla
-    paddingVertical: theme.spacing.sm, // Tıklama alanı
-    marginBottom: theme.spacing.md,
+    alignSelf: 'flex-end',
+    marginBottom: 24,
   },
   forgotPasswordText: {
     color: theme.colors.primary,
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Outfit_400Regular',
   },
   submitButton: {
     backgroundColor: theme.colors.primary,
-    borderRadius: theme.borderRadius.lg, // Daha yuvarlak
-    paddingVertical: 15, // Yüksekliği artır
-    width: '100%',
+    borderRadius: 8,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 50, // ActivityIndicator için
+    minHeight: 50,
   },
   submitButtonDisabled: {
-    backgroundColor: theme.colors.disabled || '#A0A0A0',
+    opacity: 0.7,
   },
   submitButtonText: {
-    color: theme.colors.primaryForeground || theme.colors.background,
+    color: '#000',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
   },
   footerContainer: {
     flexDirection: 'row',
-    marginTop: theme.spacing.xl, // Formdan sonra daha fazla boşluk
-    paddingBottom: theme.spacing.md, // Ekranın altına çok yapışmasın
+    justifyContent: 'center',
+    marginTop: 24,
   },
   footerText: {
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     fontSize: 14,
+    fontFamily: 'Outfit_400Regular',
   },
   footerLink: {
     color: theme.colors.primary,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
+    marginLeft: 4,
+  },
+  googleButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontFamily: 'Outfit_700Bold',
   },
 });

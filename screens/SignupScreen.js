@@ -12,6 +12,7 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -26,14 +27,14 @@ import GoogleButton from '../components/GoogleButton';
 import * as Google from 'expo-auth-session/providers/google';
 
 export default function SignupScreen({ navigation }) {
+  const { width } = Dimensions.get('window');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
     androidClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
     iosClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
-    webClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com',
+    expoClientId: '595531085941-48310a4460ade282d2a03c.apps.googleusercontent.com'
   });
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
@@ -105,18 +106,20 @@ export default function SignupScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.container}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContentContainer}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bounces={false}
       >
         <View style={styles.content}>
           <Image
             source={require('../assets/logo.png')}
-            style={styles.logo}
+            style={[styles.logo, { width: width * 0.5 }]}
             resizeMode="contain"
           />
 
@@ -130,6 +133,7 @@ export default function SignupScreen({ navigation }) {
             disabled={!request || isSubmitting || googleSubmitting}
             loading={googleSubmitting}
             text="Google ile Devam Et"
+            textStyle={styles.googleButtonText}
           />
 
           <View style={styles.dividerContainer}>
@@ -269,144 +273,133 @@ export default function SignupScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
   },
   scrollContentContainer: {
     flexGrow: 1,
-    justifyContent: 'center',
+    backgroundColor: '#000',
+    minHeight: '100%',
   },
   content: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.xl,
-    alignItems: 'center',
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: '#000',
+    minHeight: '100%',
   },
   logo: {
-    width: Platform.OS === 'web' ? 200 : 180,
-    height: Platform.OS === 'web' ? 70 : 60,
-    marginBottom: theme.spacing.lg,
+    height: 60,
+    marginBottom: 24,
+    alignSelf: 'center',
   },
   title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.sm,
+    fontSize: 24,
+    color: '#fff',
+    marginBottom: 8,
     textAlign: 'center',
+    fontFamily: 'Outfit_700Bold',
   },
   subtitle: {
     fontSize: 16,
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     textAlign: 'center',
-    marginBottom: theme.spacing.lg,
-    paddingHorizontal: theme.spacing.md,
-  },
-  socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.lg,
-    width: '100%',
-    marginBottom: theme.spacing.md,
-    borderWidth: 1,
-  },
-  googleButton: {
-    backgroundColor: theme.colors.white,
-    borderColor: theme.colors.border,
-  },
-  socialIcon: {
-    width: 24,
-    height: 24,
-    marginRight: theme.spacing.md,
-  },
-  googleButtonText: {
-    color: theme.colors.black,
-    fontSize: 16,
-    fontWeight: '600',
+    marginBottom: 24,
+    fontFamily: 'Outfit_400Regular',
   },
   dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '90%',
-    marginVertical: theme.spacing.lg,
+    marginVertical: 24,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: theme.colors.border,
+    backgroundColor: '#27272A',
   },
   dividerText: {
-    color: theme.colors.textSecondary,
-    paddingHorizontal: theme.spacing.md,
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#71717A',
+    paddingHorizontal: 16,
+    fontSize: 14,
+    fontFamily: 'Outfit_400Regular',
   },
   formContainer: {
     width: '100%',
   },
   inputOuterContainer: {
-    marginBottom: theme.spacing.xs,
+    marginBottom: 16,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.inputBackground || theme.colors.card,
-    borderRadius: theme.borderRadius.md,
-    paddingHorizontal: theme.spacing.md,
+    backgroundColor: '#000',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#27272A',
     height: 50,
-    marginBottom: theme.spacing.sm,
   },
   inputErrorBorder: {
-    borderColor: theme.colors.error,
+    borderColor: '#ef4444',
   },
   inputIcon: {
-    marginRight: theme.spacing.sm,
+    marginRight: 12,
   },
   input: {
     flex: 1,
-    color: theme.colors.inputText || theme.colors.text,
-    fontSize: 15,
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
+    height: '100%',
+    paddingVertical: 0,
+    paddingRight: 40,
   },
   passwordToggle: {
-    padding: theme.spacing.sm,
+    position: 'absolute',
+    right: 12,
+    padding: 8,
   },
   errorText: {
-    color: theme.colors.error,
-    fontSize: 13,
-    paddingLeft: theme.spacing.xs,
-    marginBottom: theme.spacing.sm,
+    color: '#ef4444',
+    fontSize: 14,
+    marginTop: 4,
+    fontFamily: 'Outfit_400Regular',
   },
   submitButton: {
     backgroundColor: theme.colors.primary,
-    borderRadius: theme.borderRadius.lg,
-    paddingVertical: 15,
-    width: '100%',
+    borderRadius: 8,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 50,
-    marginTop: theme.spacing.sm, // Inputlardan sonra biraz boşluk
   },
   submitButtonDisabled: {
-    backgroundColor: theme.colors.disabled || '#A0A0A0',
+    opacity: 0.7,
   },
   submitButtonText: {
-    color: theme.colors.primaryForeground || theme.colors.background,
+    color: '#000',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
   },
   footerContainer: {
     flexDirection: 'row',
-    marginTop: theme.spacing.xl,
-    paddingBottom: theme.spacing.md,
+    justifyContent: 'center',
+    marginTop: 24,
   },
   footerText: {
-    color: theme.colors.textSecondary,
+    color: '#71717A',
     fontSize: 14,
+    fontFamily: 'Outfit_400Regular',
   },
   footerLink: {
     color: theme.colors.primary,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Outfit_700Bold',
+    marginLeft: 4,
+  },
+  googleButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontFamily: 'Outfit_700Bold',
   },
 });

@@ -1,60 +1,37 @@
+// TestCard.js
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { theme } from '../theme';
 
 const TestCard = ({ test, onPress, style }) => {
+  const title = test.title || 'İsimsiz Test';
+  const thumbnailUrl = test.thumbnailUrl || null;
+  const playCount = test.playCount || 0;
+  const likeCount = test.likeCount || 0;
+
   return (
     <TouchableOpacity 
-      style={[styles.container, style]} 
+      style={[styles.container, style]}
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={0.85}
     >
       <View style={styles.imageContainer}>
         <Image 
-          source={{ uri: test.thumbnailUrl }} 
+          source={thumbnailUrl ? { uri: thumbnailUrl } : require('../assets/placeholder.png')} 
           style={styles.image}
-          defaultSource={require('../assets/placeholder.png')}
-          onError={(e) => {
-            console.log('Resim yükleme hatası:', e.nativeEvent.error);
-          }}
         />
-        {test.featured && (
-          <View style={styles.featuredBadge}>
-            <Feather name="star" size={12} color="#fff" />
-            <Text style={styles.featuredText}>Öne Çıkan</Text>
-          </View>
-        )}
       </View>
       <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>
-          {test.title || 'İsimsiz Test'}
-        </Text>
-        <Text style={styles.description} numberOfLines={2}>
-          {test.description || 'Açıklama bulunmuyor'}
-        </Text>
-        <View style={styles.categoryContainer}>
-          <Feather name="tag" size={14} color={theme.colors.textSecondary} />
-          <Text style={styles.categoryText}>
-            {test.categoryName || 'Kategorisiz'}
-          </Text>
-        </View>
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Feather name="play" size={14} color={theme.colors.textSecondary} />
-            <Text style={styles.statText}>{test.playCount || 0}</Text>
+        <Text style={styles.title} numberOfLines={2}>{title}</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Feather name="play" size={12} color={theme.colors.textSecondary} />
+            <Text style={styles.statText}>{playCount}</Text>
           </View>
-          <View style={styles.statItem}>
-            <Feather name="heart" size={14} color={theme.colors.textSecondary} />
-            <Text style={styles.statText}>{test.likeCount || 0}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Feather name="message-circle" size={14} color={theme.colors.textSecondary} />
-            <Text style={styles.statText}>{test.commentCount || 0}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Feather name="help-circle" size={14} color={theme.colors.textSecondary} />
-            <Text style={styles.statText}>{test.questions?.length || 0}</Text>
+          <View style={styles.statBox}>
+            <Feather name="thumbs-up" size={12} color={theme.colors.textSecondary} />
+            <Text style={styles.statText}>{likeCount}</Text>
           </View>
         </View>
       </View>
@@ -64,76 +41,50 @@ const TestCard = ({ test, onPress, style }) => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: theme.colors.card,
-    borderRadius: 16,
     overflow: 'hidden',
-    elevation: 2,
-    shadowColor: theme.colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    width: '100%',
+    marginBottom: 8,
   },
   imageContainer: {
-    position: 'relative',
+    width: '100%',
+    aspectRatio: 4 / 3, // Daha kareye yakın, daha kompakt
   },
   image: {
     width: '100%',
-    height: 160,
+    height: '100%',
     resizeMode: 'cover',
-  },
-  featuredBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: theme.colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  featuredText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
+    borderRadius: 8,
+
   },
   content: {
-    padding: 16,
+    padding: 8,
   },
   title: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-    marginBottom: 4,
-  },
-  description: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginBottom: 12,
-  },
-  categoryContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  categoryText: {
     fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginLeft: 4,
+    fontFamily: 'Outfit_400Regular',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    lineHeight: 15,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statItem: {
+  statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+  },
+  statBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderColor: '#27272A',
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   statText: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginLeft: 4,
+    fontSize: 10,
+    color: '#9E9E9E',
+    fontFamily: 'Outfit_400Regular',
+    marginLeft: 3,
   },
 });
 

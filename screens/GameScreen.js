@@ -10,14 +10,15 @@ import {
   Dimensions,
   TextInput,
   Keyboard,
-  FlatList
+  FlatList, // FlatList importu mevcut ancak kodda kullanılmıyor, isterseniz kaldırılabilir.
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { theme } from '../theme';
 
 const { width } = Dimensions.get('window');
-const GRID_SIZE = 4; // 4x4 grid, webdeki gibi daha fazla parça
+const GRID_SIZE = 5; // 5x5 grid
 const CELL_SIZE = width * 0.8 / GRID_SIZE;
 const MAX_TIME = 20; // saniye cinsinden, örnek
 
@@ -43,114 +44,147 @@ function levenshtein(a, b) {
   return matrix[a.length][b.length];
 }
 
+function generateRevealGrid(gridSize, revealPercent) {
+  const totalCells = gridSize * gridSize;
+  const cellsToReveal = Math.floor(totalCells * (revealPercent / 100));
+  
+  const allCells = Array.from({ length: totalCells }, (_, i) => i);
+  
+  for (let i = allCells.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allCells[i], allCells[j]] = [allCells[j], allCells[i]];
+  }
+  
+  return allCells.slice(0, cellsToReveal);
+}
+
 const GameScreen = ({ route, navigation }) => {
   const { test } = route.params;
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [revealedCells, setRevealedCells] = useState([]);
+  const [revealPercent, setRevealPercent] = useState(30);
   const [answer, setAnswer] = useState('');
-  const [inputError, setInputError] = useState('');
-  const [timeLeft, setTimeLeft] = useState(MAX_TIME);
-  const [skipped, setSkipped] = useState(false);
+  const [wrongAttempts, setWrongAttempts] = useState(0);
   const [guessHistory, setGuessHistory] = useState([]);
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [revealedCells, setRevealedCells] = useState([]);
+  const [showCorrectEffect, setShowCorrectEffect] = useState(false);
+  const [showWrongEffect, setShowWrongEffect] = useState(false);
+  const [isGuessHistoryVisible, setIsGuessHistoryVisible] = useState(false);
   const timerRef = useRef();
 
   useEffect(() => {
-    if (test && test.questions) {
-      setLoading(false);
-      setTimeLeft(MAX_TIME);
-      setRevealedCells([getRandomCell()]); // ilk başta bir parça açık
+    if (!test || !test.questions || test.questions.length === 0) {
+      Alert.alert(
+        'Hata',
+        'Test verileri yüklenemedi. Lütfen tekrar deneyin.',
+        [
+          { text: 'Tamam', onPress: () => navigation.goBack() }
+        ]
+      );
+      return;
     }
+
+    setLoading(false);
+    startTimer();
+    setRevealedCells(generateRevealGrid(GRID_SIZE, revealPercent));
   }, [test]);
 
   useEffect(() => {
     if (!loading && !gameOver) {
-      setTimeLeft(MAX_TIME);
       setAnswer('');
-      setInputError('');
-      setSkipped(false);
-      setGuessHistory([]);
-      setRevealedCells([getRandomCell()]);
-      startTimer();
+      setWrongAttempts(0);
+      setRevealPercent(30);
+      setRevealedCells(generateRevealGrid(GRID_SIZE, 30));
     }
     return () => clearInterval(timerRef.current);
   }, [currentQuestionIndex]);
 
-  useEffect(() => {
-    if (timeLeft === 0 && !gameOver) {
-      handleSkip();
-    }
-  }, [timeLeft]);
-
   const currentQuestion = test?.questions[currentQuestionIndex];
-
-  function getRandomCell() {
-    return Math.floor(Math.random() * (GRID_SIZE * GRID_SIZE));
-  }
-
-  function revealRandomCell() {
-    const allCells = Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => i);
-    const hiddenCells = allCells.filter(i => !revealedCells.includes(i));
-    if (hiddenCells.length === 0) return;
-    const randomCell = hiddenCells[Math.floor(Math.random() * hiddenCells.length)];
-    setRevealedCells(prev => [...prev, randomCell]);
-  }
 
   function startTimer() {
     clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => prev > 0 ? prev - 1 : 0);
+      setTimeElapsed(prev => prev + 1);
     }, 1000);
+  }
+
+  function calculateNewRevealPercent(currentPercent, wrongAttempts) {
+    const increaseAmount = Math.min(5 + (wrongAttempts * 2), 15);
+    return Math.min(currentPercent + increaseAmount, 100);
+  }
+
+  function calculateScore(revealPercent) {
+    const baseScore = 1000;
+    const revealPenalty = Math.round(revealPercent * 10);
+    return Math.max(baseScore - revealPenalty, 100);
   }
 
   function handleGuess() {
     if (!answer || typeof answer !== 'string' || !answer.trim()) {
-      setInputError('Lütfen bir cevap girin.');
       return;
     }
-    if (!currentQuestion || !currentQuestion.answer || typeof currentQuestion.answer !== 'string') {
-      setInputError('Soru verisi hatalı.');
-      return;
-    }
-    setInputError('');
+
     Keyboard.dismiss();
-    const userAnswer = answer.trim();
-    const correctAnswer = currentQuestion.answer.trim();
+    const userAnswer = answer.trim().toLowerCase();
+    const correctAnswers = currentQuestion.answers.map(ans => ans.toLowerCase());
     let type = 'wrong';
-    if (userAnswer.toLowerCase() === correctAnswer.toLowerCase()) {
+    
+    if (correctAnswers.includes(userAnswer)) {
       type = 'correct';
-    } else if (levenshtein(userAnswer.toLowerCase(), correctAnswer.toLowerCase()) <= 2) {
-      type = 'close';
-    }
-    setGuessHistory(prev => [...prev, { text: userAnswer, type }]);
-    if (type === 'correct') {
-      setScore(prev => prev + 1);
-      setTimeout(() => {
-        Alert.alert('Doğru!', 'Tebrikler, doğru bildiniz!', [
-          { text: 'Devam', onPress: nextQuestion }
-        ]);
-      }, 300);
+      setShowCorrectEffect(true);
+      setTimeout(() => setShowCorrectEffect(false), 1000);
     } else {
-      revealRandomCell();
-      setInputError(type === 'close' ? 'Çok yakın! Biraz daha dikkatli yaz.' : 'Yanlış cevap! Bir parça daha açıldı.');
+      const isClose = correctAnswers.some(correctAnswer => 
+        levenshtein(userAnswer, correctAnswer) <= 2
+      );
+      if (isClose) {
+        type = 'close';
+      } else {
+        setShowWrongEffect(true);
+        setTimeout(() => setShowWrongEffect(false), 1000);
+      }
+    }
+    
+    setGuessHistory(prev => [{ text: userAnswer, type }, ...prev]);
+    setAnswer('');
+    
+    if (type === 'correct') {
+      const questionScore = calculateScore(revealPercent);
+      setScore(prev => prev + questionScore);
+      
+      setTimeout(() => {
+        if (currentQuestionIndex < test.questions.length - 1) {
+          setCurrentQuestionIndex(prev => prev + 1);
+          setRevealPercent(30);
+          setGuessHistory([]);
+          setAnswer('');
+          setIsGuessHistoryVisible(false);
+        } else {
+          setGameOver(true);
+          clearInterval(timerRef.current);
+        }
+      }, 1500);
+    } else {
+      setWrongAttempts(prev => prev + 1);
+      const newRevealPercent = calculateNewRevealPercent(revealPercent, wrongAttempts + 1);
+      setRevealPercent(newRevealPercent);
+      setRevealedCells(generateRevealGrid(GRID_SIZE, newRevealPercent));
     }
   }
 
   function handleSkip() {
-    setSkipped(true);
-    Alert.alert('Süre doldu!', 'Bu soruyu atladınız.', [
-      { text: 'Devam', onPress: nextQuestion }
-    ]);
-  }
-
-  function nextQuestion() {
-    clearInterval(timerRef.current);
     if (currentQuestionIndex < test.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
+      setRevealPercent(30);
+      setGuessHistory([]);
+      setAnswer('');
+      setIsGuessHistoryVisible(false);
     } else {
       setGameOver(true);
+      clearInterval(timerRef.current);
     }
   }
 
@@ -158,12 +192,12 @@ const GameScreen = ({ route, navigation }) => {
     setCurrentQuestionIndex(0);
     setScore(0);
     setGameOver(false);
-    setRevealedCells([getRandomCell()]);
-    setTimeLeft(MAX_TIME);
+    setRevealPercent(30);
+    setTimeElapsed(0);
     setAnswer('');
-    setInputError('');
-    setSkipped(false);
+    setWrongAttempts(0);
     setGuessHistory([]);
+    setIsGuessHistoryVisible(false);
     startTimer();
   }
 
@@ -205,6 +239,7 @@ const GameScreen = ({ route, navigation }) => {
                   }
                 ]}
                 resizeMode="cover"
+                // cachePolicy="memory-disk" // React Native Image'de cachePolicy prop'u yok. Varsayılan davranış kullanılır.
               />
             )}
           </View>
@@ -230,32 +265,37 @@ const GameScreen = ({ route, navigation }) => {
   if (gameOver) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.gameOverContainer}>
-          <Text style={styles.gameOverTitle}>Test Tamamlandı!</Text>
-          <Text style={styles.scoreText}>
-            Puanınız: {score}/{test.questions.length}
-          </Text>
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.restartButton]}
-              onPress={handleRestart}
-            >
-              <Text style={styles.buttonText}>Tekrar Oyna</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.exitButton]}
-              onPress={() => navigation.goBack()}
-            >
-              <Text style={styles.buttonText}>Çıkış</Text>
-            </TouchableOpacity>
+        <View style={styles.gameOverOverlay}>
+          <View style={styles.gameOverContainer}>
+            <View style={styles.trophyContainer}>
+              <Feather name="award" size={48} color={theme.colors.primary} />
+            </View>
+            <Text style={styles.gameOverTitle}>Test Tamamlandı! 🎉</Text>
+            <Text style={styles.scoreText}>{score} Puan</Text>
+            <Text style={styles.timeText}>
+              Toplam süre: {Math.floor(timeElapsed / 60)}:{(timeElapsed % 60).toString().padStart(2, '0')}
+            </Text>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={[styles.button, styles.restartButton]}
+                onPress={handleRestart}
+              >
+                <Feather name="play" size={20} color={theme.colors.primaryForeground} />
+                <Text style={styles.buttonText}>Tekrar Oyna</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, styles.exitButton]}
+                onPress={() => navigation.goBack()} // Test detayları yerine ana menüye dönme olabilir
+              >
+                <Feather name="home" size={20} color={theme.colors.text} /> 
+                <Text style={[styles.buttonText, {color: theme.colors.text}]}>Ana Menü</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </SafeAreaView>
     );
   }
-
-  // Açık parça yüzdesi
-  const percentVisible = Math.round((revealedCells.length / (GRID_SIZE * GRID_SIZE)) * 100);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -264,78 +304,122 @@ const GameScreen = ({ route, navigation }) => {
         <TouchableOpacity onPress={handleExit}>
           <Feather name="x" size={24} color={theme.colors.text} />
         </TouchableOpacity>
-        <Text style={styles.progress}>
+        <Text style={styles.headerTitle}>{test.title}</Text>
+        <View style={styles.scoreContainer}>
+          <Feather name="trophy" size={20} color={theme.colors.primary} />
+          <Text style={styles.score}>{score}</Text>
+        </View>
+      </View>
+
+      {/* İlerleme Çubuğu */}
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBar}>
+          <View 
+            style={[
+              styles.progressFill,
+              { width: `${(currentQuestionIndex / test.questions.length) * 100}%` }
+            ]} 
+          />
+        </View>
+        <Text style={styles.progressText}>
           {currentQuestionIndex + 1}/{test.questions.length}
         </Text>
-        <View style={styles.timerBox}>
-          <Feather name="clock" size={16} color={theme.colors.textSecondary} />
-          <Text style={styles.timerText}>{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</Text>
-        </View>
-        <Text style={styles.score}>🏆 {score}</Text>
       </View>
 
-      {/* Soru ve Grid */}
-      <View style={styles.content}>
-        <Text style={styles.questionTitle}>Soru {currentQuestionIndex + 1}/{test.questions.length}</Text>
-        <Text style={styles.questionText}>{currentQuestion.question}</Text>
-        <View style={styles.gridContainer}>
-          {renderGrid()}
-          <View style={styles.percentBox}>
-            <Feather name="eye" size={16} color="#fff" />
-            <Text style={styles.percentText}>{percentVisible}% görünür</Text>
+      {/* Ana Oyun Alanı */}
+      <ScrollView contentContainerStyle={styles.scrollContentContainer} keyboardShouldPersistTaps="handled">
+        <View style={styles.content}>
+          <View style={styles.questionContainer}>
+            <Text style={styles.questionTitle}>Soru {currentQuestionIndex + 1}</Text>
+            <Text style={styles.questionText}>{currentQuestion.question}</Text>
           </View>
-        </View>
-        {/* Tahmin geçmişi */}
-        {guessHistory.length > 0 && (
-          <View style={styles.guessHistoryBox}>
-            <Text style={styles.guessHistoryLabel}>Tahminleriniz:</Text>
-            <FlatList
-              data={guessHistory}
-              keyExtractor={(_, idx) => idx.toString()}
-              renderItem={({ item }) => (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 12 }}>
-                  <Text
-                    style={[
-                      styles.guessHistoryItem,
-                      item.type === 'correct' && { color: 'green', fontWeight: 'bold' },
-                      item.type === 'close' && { color: 'orange' },
-                      item.type === 'wrong' && { color: theme.colors.error }
-                    ]}
-                  >
-                    {item.text}
-                  </Text>
-                  {item.type === 'correct' && <Feather name="check-circle" size={16} color="green" style={{ marginLeft: 4 }} />}
-                  {item.type === 'close' && <Feather name="alert-circle" size={16} color="orange" style={{ marginLeft: 4 }} />}
-                  {item.type === 'wrong' && <Feather name="x-circle" size={16} color={theme.colors.error} style={{ marginLeft: 4 }} />}
+
+          <View style={[
+            styles.gridContainer,
+            showCorrectEffect && styles.correctEffect,
+            showWrongEffect && styles.wrongEffect
+          ]}>
+            {renderGrid()}
+            <View style={styles.percentBox}>
+              <Feather name="eye" size={16} color="#fff" />
+              <Text style={styles.percentText}>{revealPercent}% görünür</Text>
+            </View>
+          </View>
+
+          {/* Tahmin Geçmişi */}
+          {guessHistory.length > 0 && (
+            <View style={styles.guessHistoryWrapper}>
+              <TouchableOpacity 
+                style={styles.guessHistoryToggle}
+                onPress={() => setIsGuessHistoryVisible(!isGuessHistoryVisible)}
+              >
+                <View style={styles.guessHistoryToggleContent}>
+                  <View style={styles.guessHistoryToggleLeft}>
+                    <Feather 
+                      name="list" 
+                      size={18} 
+                      color={theme.colors.text} 
+                    />
+                    <Text style={styles.guessHistoryToggleText}>
+                      Tahmin Geçmişi ({guessHistory.length})
+                    </Text>
+                  </View>
+                  <Feather 
+                    name={isGuessHistoryVisible ? "chevron-up" : "chevron-down"} 
+                    size={18} 
+                    color={theme.colors.text} 
+                  />
+                </View>
+              </TouchableOpacity>
+
+              {isGuessHistoryVisible && (
+                <View style={styles.guessHistoryContainer}>
+                  <FlatList 
+                    data={guessHistory}
+                    keyExtractor={(item, index) => index.toString()}
+                    renderItem={({ item }) => (
+                      <View 
+                        style={[
+                          styles.guessHistoryItem,
+                          item.type === 'correct' && styles.correctGuessContainer,
+                          item.type === 'close' && styles.closeGuessContainer,
+                          item.type === 'wrong' && styles.wrongGuessContainer
+                        ]}
+                      >
+                        <Text style={styles.guessHistoryText}>{item.text}</Text>
+                      </View>
+                    )}
+                    showsVerticalScrollIndicator={false}
+                    style={styles.guessHistoryList}
+                  />
                 </View>
               )}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-            />
-          </View>
-        )}
-      </View>
+            </View>
+          )}
 
-      {/* Cevap Girişi ve Butonlar */}
-      <View style={styles.answerBox}>
-        <Text style={styles.answerLabel}>Cevabınız</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Cevabınızı yazın..."
-          placeholderTextColor={theme.colors.textSecondary}
-          value={answer}
-          onChangeText={setAnswer}
-          editable={!skipped}
-          onSubmitEditing={handleGuess}
-        />
-        {inputError ? <Text style={styles.inputError}>{inputError}</Text> : null}
-        <TouchableOpacity style={styles.guessButton} onPress={handleGuess} disabled={skipped}>
-          <Text style={styles.guessButtonText}>Tahmin Et</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.skipButton} onPress={handleSkip} disabled={skipped}>
-          <Text style={styles.skipButtonText}>Soruyu Atla</Text>
-        </TouchableOpacity>
-      </View>
+          {/* Cevap Girişi */}
+          <View style={styles.answerBox}>
+            <Text style={styles.answerLabel}>Cevabınız</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Cevabınızı yazın..."
+              placeholderTextColor={theme.colors.textSecondary}
+              value={answer}
+              onChangeText={setAnswer}
+              editable={!gameOver}
+              onSubmitEditing={handleGuess}
+            />
+            <View style={styles.buttonRow}>
+              <TouchableOpacity style={[styles.guessButton, { flex: 1 }]} onPress={handleGuess} disabled={gameOver}>
+                <Text style={styles.guessButtonText}>Tahmin Et</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.skipButton, { flex: 1 }]} onPress={handleSkip} disabled={gameOver}>
+                <Text style={styles.skipButtonText}>Soruyu Atla</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -343,66 +427,99 @@ const GameScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: theme.spacing.lg,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: '#27272A',
   },
-  progress: {
-    ...theme.typography.body2,
-    color: theme.colors.textSecondary,
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 16,
+    fontFamily: 'Outfit_400Regular',
   },
-  timerBox: {
+  scoreContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.card,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginHorizontal: 8,
-  },
-  timerText: {
-    marginLeft: 4,
-    color: theme.colors.textSecondary,
-    fontWeight: 'bold',
+    borderWidth: 1,
+    borderColor: '#27272A',
   },
   score: {
-    ...theme.typography.body2,
     color: theme.colors.primary,
-    marginLeft: 8,
+    fontWeight: 'bold',
+    marginLeft: 4,
+    fontFamily: 'Outfit_700Bold',
+  },
+  progressContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: '#27272A',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: theme.colors.primary,
+    borderRadius: 2,
+  },
+  progressText: {
+    color: '#71717A',
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: 'right',
+    fontFamily: 'Outfit_400Regular',
   },
   content: {
-    flex: 1,
-    padding: theme.spacing.lg,
+    padding: 16,
+  },
+  questionContainer: {
+    marginBottom: 24,
   },
   questionTitle: {
-    ...theme.typography.h3,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.sm,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+    fontFamily: 'Outfit_700Bold',
   },
   questionText: {
-    ...theme.typography.body1,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.md,
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
+    fontFamily: 'Outfit_400Regular',
   },
   gridContainer: {
     alignSelf: 'center',
-    marginVertical: theme.spacing.lg,
-    backgroundColor: theme.colors.card,
+    marginVertical: 24,
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#27272A',
   },
   row: {
     flexDirection: 'row',
@@ -411,15 +528,15 @@ const styles = StyleSheet.create({
     width: CELL_SIZE,
     height: CELL_SIZE,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
+    borderColor: '#27272A',
+    backgroundColor: '#000',
     overflow: 'hidden',
   },
   revealedCell: {
     backgroundColor: 'transparent',
   },
   hiddenCell: {
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
   },
   cellImage: {
     position: 'absolute',
@@ -433,114 +550,217 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 4,
   },
   percentText: {
     color: '#fff',
     marginLeft: 4,
     fontSize: 13,
+    fontFamily: 'Outfit_400Regular',
+  },
+  guessHistoryWrapper: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  guessHistoryContainer: {
+    position: 'absolute',
+    bottom: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#000',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272A',
+    marginBottom: 8,
+    maxHeight: 200,
+  },
+  guessHistoryToggle: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  guessHistoryToggleContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  guessHistoryToggleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  guessHistoryToggleText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#fff',
+    fontFamily: 'Outfit_400Regular',
+  },
+  guessHistoryList: {
+    maxHeight: 200,
+  },
+  guessHistoryItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  guessHistoryText: {
+    fontSize: 14,
+    color: '#fff',
+    flex: 1,
+    fontFamily: 'Outfit_400Regular',
+  },
+  correctGuessContainer: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#22c55e',
+  },
+  closeGuessContainer: {
+    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#eab308',
+  },
+  wrongGuessContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ef4444',
   },
   answerBox: {
-    backgroundColor: theme.colors.card,
-    padding: theme.spacing.lg,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    padding: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#27272A',
   },
   answerLabel: {
-    ...theme.typography.body2,
-    color: theme.colors.text,
-    marginBottom: 4,
+    fontSize: 14,
+    color: '#fff',
+    marginBottom: 8,
+    fontFamily: 'Outfit_400Regular',
   },
   input: {
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#000',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: '#27272A',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: theme.colors.text,
-    marginBottom: 8,
+    paddingVertical: 10,
+    color: '#fff',
+    marginBottom: 12,
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
   },
-  inputError: {
-    color: theme.colors.error,
-    marginBottom: 8,
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
   guessButton: {
     backgroundColor: theme.colors.primary,
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    marginBottom: 8,
   },
   guessButtonText: {
-    color: theme.colors.primaryForeground,
-    fontWeight: 'bold',
+    color: '#000',
     fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
   },
   skipButton: {
-    backgroundColor: theme.colors.border,
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#27272A',
   },
   skipButtonText: {
-    color: theme.colors.text,
-    fontWeight: 'bold',
+    color: theme.colors.textSecondary,
     fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
   },
-  gameOverContainer: {
+  gameOverOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: theme.spacing.xl,
+    padding: 24,
+  },
+  gameOverContainer: {
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  trophyContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: theme.colors.primary + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
   },
   gameOverTitle: {
-    ...theme.typography.h1,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.xl,
+    fontSize: 24,
+    fontWeight: '400',
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
+    fontFamily: 'Outfit_400Regular',
   },
   scoreText: {
-    ...theme.typography.h2,
+    fontSize: 36,
+    fontWeight: 'bold',
     color: theme.colors.primary,
-    marginBottom: theme.spacing.xl,
+    marginBottom: 8,
+    fontFamily: 'Outfit_700Bold',
+  },
+  timeText: {
+    fontSize: 16,
+    color: '#71717A',
+    marginBottom: 24,
+    fontFamily: 'Outfit_400Regular',
   },
   buttonContainer: {
     flexDirection: 'row',
-    gap: theme.spacing.md,
+    gap: 12,
+    width: '100%',
   },
   button: {
-    paddingHorizontal: theme.spacing.xl,
-    paddingVertical: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
   },
   restartButton: {
     backgroundColor: theme.colors.primary,
   },
   exitButton: {
-    backgroundColor: theme.colors.error,
+    borderWidth: 1,
+    borderColor: '#27272A',
   },
   buttonText: {
-    ...theme.typography.button,
-    color: theme.colors.primaryForeground,
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    fontFamily: 'Outfit_700Bold',
   },
-  guessHistoryBox: {
-    marginTop: theme.spacing.lg,
-    padding: theme.spacing.lg,
-    backgroundColor: theme.colors.card,
-    borderRadius: 12,
+  correctEffect: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
   },
-  guessHistoryLabel: {
-    ...theme.typography.body2,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.sm,
-  },
-  guessHistoryItem: {
-    ...theme.typography.body1,
-    color: theme.colors.text,
-    marginRight: theme.spacing.sm,
+  wrongEffect: {
+    borderColor: '#ef4444',
+    borderWidth: 2,
   },
 });
 
-export default GameScreen; 
+export default GameScreen;

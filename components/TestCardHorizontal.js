@@ -15,9 +15,6 @@ const TestCardHorizontal = ({ test, onPress, style }) => {
           source={{ uri: test.thumbnailUrl }} 
           style={styles.image}
           defaultSource={require('../assets/placeholder.png')}
-          onError={(e) => {
-            console.log('Resim yükleme hatası:', e.nativeEvent.error);
-          }}
         />
         {test.featured && (
           <View style={styles.featuredBadge}>
